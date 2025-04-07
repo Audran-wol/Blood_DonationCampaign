@@ -21,7 +21,7 @@ import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
 
-def prepare_data_for_modeling(df):
+def prepare_data_for_modeling(df, selected_features=None):
     """
     Prepare data for machine learning modeling.
     
@@ -29,6 +29,8 @@ def prepare_data_for_modeling(df):
     -----------
     df : pd.DataFrame
         Cleaned dataframe with donor information
+    selected_features : list, optional
+        Specific features to use. If None, will use all viable features
         
     Returns:
     --------
@@ -48,58 +50,68 @@ def prepare_data_for_modeling(df):
         print("No eligibility or target data available for modeling")
         return None, None, None
     
-    # Define potential features
-    numeric_features = []
-    if 'Age' in df.columns:
-        numeric_features.append('Age')
-    
-    if 'Health_Risk_Score' in df.columns:
-        numeric_features.append('Health_Risk_Score')
-    
-    # Health columns - add direct health indicators
-    health_cols = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré',
-                  'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
-                  'Cardiaque', 'Tatoué', 'Scarifié']
-    
-    health_cols_present = [col for col in health_cols if col in df.columns]
-    numeric_features.extend(health_cols_present)
-    
-    # Categorical features
-    categorical_features = []
-    
-    if 'Gender' in df.columns:
-        categorical_features.append('Gender')
-    
-    if 'Previous_Donation' in df.columns:
-        categorical_features.append('Previous_Donation')
-    
-    if 'Age_Group' in df.columns:
-        categorical_features.append('Age_Group')
+    # Use provided features if available
+    if selected_features is not None and len(selected_features) > 0:
+        features = [f for f in selected_features if f in df.columns and f not in ['Eligibility', 'target']]
+        if len(features) == 0:
+            print("None of the selected features are available in the dataframe")
+            return None, None, None
+    else:
+        # Auto-select features if none provided
+        # Define potential features
+        numeric_features = []
+        if 'Age' in df.columns:
+            numeric_features.append('Age')
+        
+        if 'Health_Risk_Score' in df.columns:
+            numeric_features.append('Health_Risk_Score')
+        
+        # Health columns - add direct health indicators
+        health_cols = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré',
+                      'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
+                      'Cardiaque', 'Tatoué', 'Scarifié']
+        
+        health_cols_present = [col for col in health_cols if col in df.columns]
+        numeric_features.extend(health_cols_present)
+        
+        # Categorical features
+        categorical_features = []
+        
+        if 'Gender' in df.columns:
+            categorical_features.append('Gender')
+        
+        if 'Previous_Donation' in df.columns:
+            categorical_features.append('Previous_Donation')
+        
+        if 'Age_Group' in df.columns:
+            categorical_features.append('Age_Group')
+        
+        # Combine all features
+        features = numeric_features + categorical_features
     
     # Check if we have enough features
-    if len(numeric_features) + len(categorical_features) == 0:
+    if len(features) == 0:
         print("Insufficient features for modeling")
         return None, None, None
     
     # Create feature dataframe
-    features = numeric_features + categorical_features
     X = df[features].copy()
     
     # Handle missing values - simple imputation
-    for col in numeric_features:
+    for col in X.select_dtypes(include=['int64', 'float64']).columns:
         X[col].fillna(X[col].median(), inplace=True)
     
-    for col in categorical_features:
-        X[col].fillna(X[col].mode()[0], inplace=True)
+    for col in X.select_dtypes(include=['object', 'category']).columns:
+        X[col].fillna(X[col].mode()[0] if not X[col].mode().empty else "Unknown", inplace=True)
     
     # Check if we have enough data after cleaning
-    if len(X) < 50:  # arbitrary minimum
+    if len(X) < 10:  # reduced minimum
         print("Insufficient data for modeling after cleaning")
         return None, None, None
     
     return X, y, features
 
-def train_eligibility_model(df, model_type='rf', test_size=0.2):
+def train_eligibility_model(df, model_type='rf', test_size=0.2, selected_features=None):
     """
     Train a model to predict donor eligibility.
     
@@ -111,17 +123,28 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
         Type of model to train ('rf' for RandomForest, 'gb' for GradientBoosting, 'lr' for LogisticRegression)
     test_size : float
         Proportion of data to use for testing
+    selected_features : list, optional
+        List of specific features to use for training
         
     Returns:
     --------
     dict
         Dictionary with model, pipeline, metrics, and feature importances
     """
+    # Print information for debugging
+    print(f"Starting model training with {model_type} model")
+    print(f"Dataframe shape: {df.shape}")
+    if selected_features:
+        print(f"Selected features: {selected_features}")
+    
     # Prepare data
-    X, y, features = prepare_data_for_modeling(df)
+    X, y, features = prepare_data_for_modeling(df, selected_features)
     
     if X is None or y is None:
+        print("Data preparation failed, no features or target available")
         return None
+    
+    print(f"After preparation: X shape={X.shape}, features={features}")
     
     # Split into train and test sets
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
@@ -129,6 +152,9 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
     # Identify numeric and categorical features
     numeric_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
     categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
+    
+    print(f"Numeric features: {numeric_features}")
+    print(f"Categorical features: {categorical_features}")
     
     # Create preprocessing pipeline
     transformers = []
@@ -139,25 +165,36 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
     if categorical_features:
         transformers.append(('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features))
     
+    if not transformers:
+        print("No transformers could be created. Check your feature types.")
+        return None
+    
     preprocessor = ColumnTransformer(transformers, remainder='drop')
     
     # Select and configure model
-    if model_type == 'rf':
-        model = RandomForestClassifier(random_state=42)
+    if model_type == 'random_forest' or model_type == 'rf':
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
         param_grid = {
             'classifier__n_estimators': [50, 100],
             'classifier__max_depth': [None, 10, 20],
             'classifier__min_samples_split': [2, 5]
         }
-    elif model_type == 'gb':
-        model = GradientBoostingClassifier(random_state=42)
+    elif model_type == 'gradient_boosting' or model_type == 'gb':
+        model = GradientBoostingClassifier(n_estimators=100, random_state=42)
         param_grid = {
             'classifier__n_estimators': [50, 100],
             'classifier__learning_rate': [0.01, 0.1],
             'classifier__max_depth': [3, 5]
         }
+    elif model_type == 'logistic_regression' or model_type == 'lr':
+        model = LogisticRegression(max_iter=1000, random_state=42)
+        param_grid = {
+            'classifier__C': [0.1, 1.0, 10.0],
+            'classifier__solver': ['liblinear', 'saga']
+        }
     else:  # default to logistic regression
-        model = LogisticRegression(random_state=42)
+        print(f"Unknown model type: {model_type}, defaulting to Logistic Regression")
+        model = LogisticRegression(max_iter=1000, random_state=42)
         param_grid = {
             'classifier__C': [0.1, 1.0, 10.0],
             'classifier__solver': ['liblinear', 'saga']
@@ -170,17 +207,20 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
     ])
     
     # Perform grid search if there's enough data
-    if len(X_train) >= 100:
+    if len(X_train) >= 100 and len(X_train) > 10 * len(features):
         try:
+            print("Performing grid search...")
             grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='f1')
             grid_search.fit(X_train, y_train)
             best_pipeline = grid_search.best_estimator_
+            print(f"Grid search complete. Best params: {grid_search.best_params_}")
         except Exception as e:
             print(f"Grid search failed: {e}. Falling back to default model.")
             pipeline.fit(X_train, y_train)
             best_pipeline = pipeline
     else:
         # Just fit with default parameters if data is limited
+        print("Using default parameters (data is limited or high-dimensional)")
         pipeline.fit(X_train, y_train)
         best_pipeline = pipeline
     
@@ -193,55 +233,80 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
         'accuracy': accuracy_score(y_test, y_pred),
         'precision': precision_score(y_test, y_pred, zero_division=0),
         'recall': recall_score(y_test, y_pred, zero_division=0),
-        'f1_score': f1_score(y_test, y_pred, zero_division=0),
-        'confusion_matrix': confusion_matrix(y_test, y_pred)
+        'f1': f1_score(y_test, y_pred, zero_division=0),
+        'confusion_matrix': confusion_matrix(y_test, y_pred).tolist()
     }
     
     # Get feature importances if applicable
     feature_importances = {}
     
     try:
-        if model_type in ['rf', 'gb']:
+        if model_type in ['rf', 'gb', 'random_forest', 'gradient_boosting']:
             # Extract feature names after one-hot encoding
-            cat_features = []
+            final_feature_names = []
+            
+            # Get numeric features directly
+            if numeric_features:
+                final_feature_names.extend(numeric_features)
+            
+            # Get transformed categorical feature names
             if categorical_features:
-                encoder = best_pipeline.named_steps['preprocessor'].transformers_[1][1]  # Get the encoder
-                cat_feature_names = encoder.get_feature_names_out(categorical_features)
-                cat_features = list(cat_feature_names)
-            
-            num_features = numeric_features
-            
-            # Combine numeric and categorical feature names
-            model_features = num_features + cat_features
+                try:
+                    for i, (name, transformer, column) in enumerate(preprocessor.transformers_):
+                        if name == 'cat':
+                            cat_feature_names = transformer.get_feature_names_out(input_features=transformer.feature_names_in_)
+                            final_feature_names.extend(cat_feature_names)
+                except Exception as e:
+                    print(f"Error getting categorical feature names: {e}")
             
             # Get importances
             importances = best_pipeline.named_steps['classifier'].feature_importances_
             
-            # Match importances with feature names (up to available length)
-            for i, importance in enumerate(importances[:len(model_features)]):
-                if i < len(model_features):
-                    feature_importances[model_features[i]] = importance
+            # Check lengths match
+            if len(importances) == len(final_feature_names):
+                for i, importance in enumerate(importances):
+                    feature_importances[final_feature_names[i]] = importance
+            else:
+                print(f"Warning: Feature importances length ({len(importances)}) doesn't match feature names length ({len(final_feature_names)})")
+                # Just use index as feature name
+                for i, importance in enumerate(importances):
+                    feature_importances[f"feature_{i}"] = importance
         
-        elif model_type == 'lr':
+        elif model_type in ['lr', 'logistic_regression']:
             # Similar approach but with coefficients instead of feature_importances_
-            cat_features = []
-            if categorical_features:
-                encoder = best_pipeline.named_steps['preprocessor'].transformers_[1][1]
-                cat_feature_names = encoder.get_feature_names_out(categorical_features)
-                cat_features = list(cat_feature_names)
+            final_feature_names = []
             
-            num_features = numeric_features
-            model_features = num_features + cat_features
+            # Get numeric features directly
+            if numeric_features:
+                final_feature_names.extend(numeric_features)
+            
+            # Get transformed categorical feature names
+            if categorical_features:
+                try:
+                    for i, (name, transformer, column) in enumerate(preprocessor.transformers_):
+                        if name == 'cat':
+                            cat_feature_names = transformer.get_feature_names_out(input_features=transformer.feature_names_in_)
+                            final_feature_names.extend(cat_feature_names)
+                except Exception as e:
+                    print(f"Error getting categorical feature names: {e}")
             
             # Get coefficients
             coefficients = best_pipeline.named_steps['classifier'].coef_[0]
             
-            # Match coefficients with feature names
-            for i, coef in enumerate(coefficients[:len(model_features)]):
-                if i < len(model_features):
-                    feature_importances[model_features[i]] = abs(coef)  # Use absolute value
+            # Check lengths match
+            if len(coefficients) == len(final_feature_names):
+                for i, coef in enumerate(coefficients):
+                    feature_importances[final_feature_names[i]] = abs(coef)  # Use absolute value
+            else:
+                print(f"Warning: Coefficients length ({len(coefficients)}) doesn't match feature names length ({len(final_feature_names)})")
+                # Just use index as feature name
+                for i, coef in enumerate(coefficients):
+                    feature_importances[f"feature_{i}"] = abs(coef)
     except Exception as e:
         print(f"Could not extract feature importances: {e}")
+    
+    # Print results summary
+    print(f"Model training complete. Metrics: Accuracy={metrics['accuracy']:.4f}, F1={metrics['f1']:.4f}")
     
     # Return results
     return {
@@ -252,7 +317,7 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2):
         'test_data': {'X': X_test, 'y': y_test}
     }
 
-def train_model(data, model_type='rf', test_size=0.2, target=None):
+def train_model(data, model_type='rf', test_size=0.2, target=None, selected_features=None):
     """
     Train a model to predict donor eligibility.
     
@@ -264,11 +329,13 @@ def train_model(data, model_type='rf', test_size=0.2, target=None):
     data : pd.DataFrame or np.ndarray
         Either a complete dataframe with target column, or feature matrix X
     model_type : str
-        Type of model to train ('rf' for RandomForest, 'gb' for GradientBoosting, 'lr' for LogisticRegression)
+        Type of model to train (rf, random_forest, gb, gradient_boosting, lr, logistic_regression)
     test_size : float
         Proportion of data to use for testing
     target : pd.Series, optional
         Target values if data is feature matrix X
+    selected_features : list, optional
+        List of specific features to use for training
         
     Returns:
     --------
@@ -284,10 +351,10 @@ def train_model(data, model_type='rf', test_size=0.2, target=None):
         # Create a temporary dataframe
         df = pd.DataFrame(X)
         df['target'] = y
-        return train_eligibility_model(df, model_type=model_type)
+        return train_eligibility_model(df, model_type=model_type, selected_features=selected_features)
     
     # Original behavior
-    return train_eligibility_model(data, model_type=model_type, test_size=test_size)
+    return train_eligibility_model(data, model_type=model_type, test_size=test_size, selected_features=selected_features)
 
 def evaluate_model(model_result, X_test=None, y_test=None):
     """
@@ -445,21 +512,43 @@ def predict_eligibility(model, input_data):
         (predictions, probabilities) or (None, None) if prediction failed
     """
     if model is None or input_data is None or input_data.empty:
+        print("Model or input data is None or empty")
         return None, None
     
     try:
-        # Make predictions
-        predictions = model.predict(input_data)
+        # Print debugging information
+        print(f"Input data shape: {input_data.shape}")
+        print(f"Input data columns: {input_data.columns.tolist()}")
+        print(f"Input data types: {input_data.dtypes}")
+        
+        # Check if model pipeline has a feature list we should verify against
+        required_features = model.get('features', None)
+        if required_features is not None:
+            # If model has a features list, ensure input data matches
+            missing_features = [f for f in required_features if f not in input_data.columns]
+            if missing_features:
+                print(f"Missing required features: {missing_features}")
+                return None, None
+        
+        # Get the actual model pipeline
+        model_pipeline = model.get('model', model)
+        
+        # Make predictions using the model pipeline
+        print("Making prediction...")
+        predictions = model_pipeline.predict(input_data)
         
         # Get probabilities if available
         probabilities = None
-        if hasattr(model, 'predict_proba'):
-            probabilities = model.predict_proba(input_data)[:, 1]  # Probability of class 1 (Eligible)
+        if hasattr(model_pipeline, 'predict_proba'):
+            probabilities = model_pipeline.predict_proba(input_data)
         
+        print(f"Prediction successful. Result: {predictions}")
         return predictions, probabilities
     
     except Exception as e:
         print(f"Error making predictions: {e}")
+        import traceback
+        traceback.print_exc()
         return None, None
 
 def visualize_model_performance(model_result):
@@ -597,7 +686,7 @@ if __name__ == "__main__":
         
         if rf_result is not None:
             print(f"Model metrics: Accuracy={rf_result['metrics']['accuracy']:.2f}, "
-                  f"F1 Score={rf_result['metrics']['f1_score']:.2f}")
+                  f"F1 Score={rf_result['metrics']['f1']:.2f}")
             
             # Save model
             save_model(rf_result)

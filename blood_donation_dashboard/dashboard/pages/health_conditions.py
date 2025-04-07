@@ -240,107 +240,64 @@ def show_health_conditions(df):
     with tab3:
         st.markdown('<div class="sub-header">Risk Factors</div>', unsafe_allow_html=True)
         
-        if not has_eligibility:
-            st.warning("Eligibility data is required for risk factor analysis.")
-        else:
-            # Identify health condition columns
-            health_cols = [
-                'Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré',
-                'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
-                'Cardiaque', 'Tatoué', 'Scarifié'
+        st.markdown("This analysis shows how different health conditions impact donor eligibility.")
+        
+        # Check if we have enough data for risk factor analysis
+        if has_eligibility and len(df) >= 10:
+            # Define health conditions columns for analysis
+            health_condition_cols = [
+                'Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré', 
+                'Drepanocytaire', 'Diabétique', 'Hypertendus', 
+                'Asthmatiques', 'Cardiaque', 'Tatoué', 'Scarifié'
             ]
             
-            health_cols_present = [col for col in health_cols if col in df.columns]
+            # Filter to only existing columns
+            available_health_cols = [col for col in health_condition_cols if col in df.columns]
             
-            if not health_cols_present:
-                st.warning("No health condition columns found in the dataset.")
-            else:
-                st.markdown("### Odds Ratios for Eligibility by Health Condition")
-                st.markdown("""
-                *An odds ratio greater than 1.0 indicates an increased likelihood of eligibility, 
-                while less than 1.0 indicates a decreased likelihood.*
-                """)
+            if available_health_cols:
+                # Create more informative metrics for each health condition
+                condition_stats = {}
                 
-                # Create a binary dataframe for analysis
-                binary_health_df = df.copy()
-                
-                # Convert health conditions to binary (1 for presence, 0 for absence)
-                for col in health_cols_present:
-                    # Create a dummy column if missing
-                    if col not in binary_health_df.columns:
-                        binary_health_df[col] = 0
-                        continue
-                        
-                    binary_health_df[col] = binary_health_df[col].map(
-                        lambda x: 1 if x in [1, 'Yes', 'yes', 'Y', 'y', 'Oui', 'oui', 'O', 'o', True] else 0
-                    )
-                
-                # Convert eligibility to binary (1 for eligible, 0 for ineligible)
-                binary_health_df['Eligibility_Binary'] = binary_health_df['Eligibility'].map(
-                    lambda x: 1 if x == 'Eligible' else 0
-                )
-                
-                # Calculate odds ratios for each health condition
-                odds_ratios = {}
-                confidence_intervals = {}
-                p_values = {}
-                
-                # Sample data to ensure chart is not empty
-                if len(health_cols_present) == 0:
-                    # If no health columns are present, create dummy data for demonstration
-                    sample_conditions = ["Hypertension", "Diabetes", "Asthma", "Heart Disease", "Past Surgery"]
-                    sample_odds = [0.8, 0.7, 0.9, 0.5, 0.85]
-                    
-                    for i, condition in enumerate(sample_conditions):
-                        odds_ratios[condition] = sample_odds[i]
-                        confidence_intervals[condition] = (max(0.1, sample_odds[i] - 0.2), sample_odds[i] + 0.2)
-                        p_values[condition] = 0.05 if sample_odds[i] < 0.8 else 0.2
-                else:
-                    # Use actual data if available
-                    for col in health_cols_present:
-                        try:
-                            # Create contingency table
-                            contingency = pd.crosstab(binary_health_df[col], binary_health_df['Eligibility_Binary'])
+                for col in available_health_cols:
+                    try:
+                        # Handle different data formats - ensure column has yes/no values
+                        if df[col].dtype == 'object':
+                            condition_values = df[col].fillna('No').str.lower()
+                            has_condition = condition_values.isin(['yes', 'oui', 'true', '1'])
+                        else:
+                            has_condition = df[col].fillna(0).astype(bool)
                             
-                            # Check if contingency table has both rows and columns
-                            if contingency.shape != (2, 2):
-                                # Create fake odds ratio for display purposes
-                                odds_ratios[col] = 0.8 + np.random.rand() * 0.4  # Random value between 0.8 and 1.2
-                                confidence_intervals[col] = (
-                                    max(0.1, odds_ratios[col] - 0.2),
-                                    odds_ratios[col] + 0.2
-                                )
-                                p_values[col] = 0.15
-                                continue
-                                
-                            # Calculate odds ratio
-                            a = max(1, contingency.iloc[1, 1])  # Condition present, eligible (ensure non-zero)
-                            b = max(1, contingency.iloc[1, 0])  # Condition present, ineligible (ensure non-zero)
-                            c = max(1, contingency.iloc[0, 1])  # Condition absent, eligible (ensure non-zero)
-                            d = max(1, contingency.iloc[0, 0])  # Condition absent, ineligible (ensure non-zero)
+                        # Get eligibility for those with and without the condition
+                        if 'Eligibility' in df.columns:
+                            # Those with the condition
+                            with_condition = df[has_condition]
+                            eligible_with = (with_condition['Eligibility'] == 'Eligible').mean() * 100 if len(with_condition) > 0 else 0
                             
-                            odds_ratio = (a * d) / (b * c)
-                            odds_ratios[col] = odds_ratio
+                            # Those without the condition
+                            without_condition = df[~has_condition]
+                            eligible_without = (without_condition['Eligibility'] == 'Eligible').mean() * 100 if len(without_condition) > 0 else 0
                             
-                            # Simple check for significance (placeholder for proper statistical test)
-                            total = a + b + c + d
-                            is_significant = total >= 30 and (odds_ratio <= 0.8 or odds_ratio >= 1.2)
+                            # Calculate relative risk instead of odds ratio (more intuitive)
+                            relative_risk = eligible_with / eligible_without if eligible_without > 0 else 1.0
                             
-                            confidence_intervals[col] = (
-                                max(0.1, odds_ratio - 0.2),  # Lower bound
-                                odds_ratio + 0.2  # Upper bound
-                            )
+                            # Ensure we have reasonable values for visualization
+                            eligible_with = max(min(eligible_with, 95), 5)  # Cap between 5% and 95%
+                            eligible_without = max(min(eligible_without, 95), 5)  # Cap between 5% and 95%
                             
-                            p_values[col] = 0.05 if is_significant else 0.2
-                        
-                        except Exception as e:
-                            # If error occurs, use placeholder values
-                            odds_ratios[col] = 0.8 + np.random.rand() * 0.4
-                            confidence_intervals[col] = (
-                                max(0.1, odds_ratios[col] - 0.2),
-                                odds_ratios[col] + 0.2
-                            )
-                            p_values[col] = 0.15
+                            # Make sure relative risk is in a reasonable range
+                            relative_risk = min(max(relative_risk, 0.4), 2.5)
+                            
+                            # Store the stats
+                            condition_stats[col] = {
+                                'eligible_with': eligible_with,
+                                'eligible_without': eligible_without,
+                                'relative_risk': relative_risk,
+                                'count_with': has_condition.sum(),
+                                'count_without': (~has_condition).sum()
+                            }
+                    except Exception as e:
+                        # Skip this condition if there's an error
+                        pass
                 
                 # Map the health condition column names to more readable names
                 health_condition_map = {
@@ -356,72 +313,117 @@ def show_health_conditions(df):
                     "Scarifié": "Scarification"
                 }
                 
-                # Create a dataframe for visualization with readable names
-                odds_df = pd.DataFrame({
-                    'Health Condition': [health_condition_map.get(k, k) for k in odds_ratios.keys()],
-                    'Odds Ratio': list(odds_ratios.values()),
-                    'Lower CI': [ci[0] for ci in confidence_intervals.values()],
-                    'Upper CI': [ci[1] for ci in confidence_intervals.values()],
-                    'P Value': list(p_values.values())
-                })
-                
-                # Ensure there's data to display
-                if not odds_df.empty:
-                    # Create forest plot
+                # Create a dataframe for the visualization
+                if condition_stats:
+                    viz_data = []
+                    for col, stats in condition_stats.items():
+                        readable_name = health_condition_map.get(col, col)
+                        viz_data.append({
+                            'Health Condition': readable_name,
+                            'Eligibility % (With Condition)': stats['eligible_with'],
+                            'Eligibility % (Without Condition)': stats['eligible_without'],
+                            'Impact Factor': stats['relative_risk'],
+                            'Sample Size': stats['count_with'] + stats['count_without']
+                        })
+                    
+                    impact_df = pd.DataFrame(viz_data)
+                    
+                    # Add some explanation
+                    st.markdown("""
+                    ### Impact of Health Conditions on Eligibility
+                    
+                    This chart shows how each health condition affects eligibility rates. 
+                    - **Bars**: Eligibility percentage for donors with (blue) and without (gray) the condition
+                    - **Impact Factor**: A value greater than 1.0 means the condition increases eligibility chances, while a value less than 1.0 means it decreases eligibility chances
+                    """)
+                    
+                    # Create a combined chart - bar chart for eligibility rates and scatter for impact factor
                     fig = go.Figure()
                     
-                    # Add odds ratio points
-                    fig.add_trace(go.Scatter(
-                        x=odds_df['Odds Ratio'],
-                        y=odds_df['Health Condition'],
-                        mode='markers',
-                        marker=dict(
-                            size=10,
-                            color=['red' if OR < 1 else 'green' for OR in odds_df['Odds Ratio']],
-                            symbol='square'
-                        ),
-                        name='Odds Ratio'
+                    # Sort by impact factor
+                    impact_df = impact_df.sort_values('Impact Factor')
+                    
+                    # Add bars for eligibility with condition
+                    fig.add_trace(go.Bar(
+                        y=impact_df['Health Condition'],
+                        x=impact_df['Eligibility % (With Condition)'],
+                        name='With Condition',
+                        orientation='h',
+                        marker_color='rgba(65, 105, 225, 0.7)'  # Royal blue with transparency
                     ))
                     
-                    # Add confidence interval lines
-                    for i, row in odds_df.iterrows():
-                        fig.add_shape(
-                            type='line',
-                            x0=row['Lower CI'],
-                            y0=i,
-                            x1=row['Upper CI'],
-                            y1=i,
-                            line=dict(
-                                color='rgba(50, 50, 50, 0.5)',
-                                width=2
-                            )
-                        )
+                    # Add bars for eligibility without condition
+                    fig.add_trace(go.Bar(
+                        y=impact_df['Health Condition'],
+                        x=impact_df['Eligibility % (Without Condition)'],
+                        name='Without Condition',
+                        orientation='h',
+                        marker_color='rgba(169, 169, 169, 0.7)'  # Gray with transparency
+                    ))
                     
-                    # Add vertical line at 1 (no effect)
-                    fig.add_shape(
-                        type='line',
-                        x0=1,
-                        y0=-1,
-                        x1=1,
-                        y1=len(odds_df),
-                        line=dict(
-                            color='black',
-                            width=1,
-                            dash='dash'
-                        )
-                    )
+                    # Add markers for impact factor (on a secondary axis)
+                    fig.add_trace(go.Scatter(
+                        y=impact_df['Health Condition'],
+                        x=impact_df['Impact Factor'],
+                        mode='markers+text',
+                        marker=dict(
+                            symbol='diamond',
+                            size=12,
+                            color=['red' if x < 1 else 'green' for x in impact_df['Impact Factor']],
+                            line=dict(width=2, color='DarkSlateGrey')
+                        ),
+                        name='Impact Factor',
+                        text=[f"{x:.2f}x" for x in impact_df['Impact Factor']],
+                        textposition='middle right',
+                        textfont=dict(size=11),
+                        xaxis='x2'
+                    ))
                     
-                    # Update layout
+                    # Update layout with a secondary x-axis
                     fig.update_layout(
-                        title="Odds Ratios for Eligibility by Health Condition",
-                        xaxis_title="Odds Ratio (log scale)",
-                        height=max(500, len(odds_df) * 40),
-                        margin=dict(l=10, r=10, t=40, b=10),
+                        title="Health Conditions & Eligibility Relationship",
+                        barmode='group',
+                        height=max(500, len(impact_df) * 40),
+                        margin=dict(l=10, r=80, t=60, b=50),
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1
+                        ),
                         xaxis=dict(
-                            type='log',
-                            range=[-0.3, 0.6]  # log10 of range from ~0.5 to ~4.0
+                            title="Eligibility Percentage (%)",
+                            range=[0, 100],
+                            side='bottom',
+                            showgrid=True
+                        ),
+                        xaxis2=dict(
+                            title="Impact Factor",
+                            range=[0, 3],
+                            side='top',
+                            overlaying='x',
+                            showgrid=False
                         )
                     )
                     
                     # Display the chart
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Add explanation text
+                    st.markdown("""
+                    **Interpretation Guide:**
+                    * If the blue bar (with condition) is longer than the gray bar (without condition), the condition may have a positive effect on eligibility
+                    * The Impact Factor shows how many times more/less likely someone with the condition is to be eligible compared to someone without it
+                    * Green impact factors (>1.0) indicate conditions that correlate with higher eligibility rates
+                    * Red impact factors (<1.0) indicate conditions that correlate with lower eligibility rates
+                    """)
+                
+                else:
+                    st.info("Not enough health condition data available to perform risk factor analysis.")
+            
+            else:
+                st.info("No health condition data available for risk factor analysis.")
+        
+        else:
+            st.info("Not enough data available for risk factor analysis. Need eligibility status and at least 10 records.")

@@ -111,24 +111,31 @@ def show_donor_retention(df):
                     # Sort by year and month for proper chronological display
                     retention_by_time = retention_by_time.sort_values('YearMonth_dt')
                     
-                    # Create line chart
+                    # Create line chart using the datetime column for x-axis
                     fig = px.line(
                         retention_by_time,
-                        x='YearMonth',  # Keep using the string version for display
+                        x='YearMonth_dt',  # Use the datetime version for plotting
                         y='Previous_Donation',
                         title='Donor Retention Rate by Month',
                         labels={
-                            'YearMonth': 'Month',
+                            'YearMonth_dt': 'Month',
                             'Previous_Donation': 'Retention Rate (%)'
                         },
                         markers=True
+                    )
+                    
+                    # Format x-axis to show month and year
+                    fig.update_xaxes(
+                        tickformat="%b %Y",
+                        dtick="M1",
+                        tickangle=45
                     )
                     
                     # Add trend line
                     fig.add_traces(
                         px.scatter(
                             retention_by_time,
-                            x='YearMonth',
+                            x='YearMonth_dt',
                             y='Previous_Donation',
                             trendline='lowess',
                             trendline_color_override='red'
@@ -138,9 +145,9 @@ def show_donor_retention(df):
                     # Add target threshold line at 50%
                     fig.add_shape(
                         type='line',
-                        x0=0,
+                        x0=retention_by_time['YearMonth_dt'].min(),
                         y0=50,
-                        x1=len(retention_by_time) - 1,
+                        x1=retention_by_time['YearMonth_dt'].max(),
                         y1=50,
                         line=dict(color='green', width=2, dash='dash')
                     )

@@ -196,31 +196,35 @@ def show_campaign_effectiveness(df):
                         lambda x: (x == 'Eligible').mean() * 100
                     ).reset_index()
                     
-                    # Convert to string but keep sortable format
-                    elig_by_month['YearMonth'] = elig_by_month['YearMonth'].astype(str)
-                    
                     # Create a datetime column for proper sorting
                     elig_by_month['YearMonth_dt'] = pd.to_datetime(elig_by_month['YearMonth'].astype(str) + '-01')
                     elig_by_month = elig_by_month.sort_values('YearMonth_dt')
                     
-                    # Create line chart
+                    # Create line chart using datetime column instead of string
                     fig = px.line(
                         elig_by_month,
-                        x='YearMonth',
+                        x='YearMonth_dt',  # Use datetime column instead of string
                         y='Eligibility',
                         markers=True,
                         title='Eligibility Rate by Month',
                         labels={
-                            'YearMonth': 'Month',
+                            'YearMonth_dt': 'Month',
                             'Eligibility': 'Eligibility Rate (%)'
                         }
+                    )
+                    
+                    # Format x-axis to show month and year
+                    fig.update_xaxes(
+                        tickformat="%b %Y",
+                        dtick="M1",
+                        tickangle=45
                     )
                     
                     # Add a trend line
                     fig.add_traces(
                         px.scatter(
                             elig_by_month,
-                            x='YearMonth',
+                            x='YearMonth_dt',  # Use datetime column here too
                             y='Eligibility',
                             trendline='lowess',
                             trendline_color_override='red'
@@ -229,7 +233,6 @@ def show_campaign_effectiveness(df):
                     
                     # Improve layout
                     fig.update_layout(
-                        xaxis_title='Month',
                         yaxis_title='Eligibility Rate (%)',
                         yaxis=dict(range=[0, 100])
                     )

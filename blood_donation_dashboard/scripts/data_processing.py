@@ -155,12 +155,15 @@ def generate_features(df):
     if 'Date de remplissage de la fiche' in df_features.columns:
         df_features['Donation_Month'] = df_features['Date de remplissage de la fiche'].dt.month
         
-        # Map months to seasons
+        # Map months to Cameroon seasons (Sunny and Rainy)
+        # Cameroon has only 2 seasons:
+        # Rainy: typically April to October
+        # Sunny: typically November to March
         season_mapping = {
-            1: 'Winter', 2: 'Winter', 3: 'Spring', 
-            4: 'Spring', 5: 'Spring', 6: 'Summer',
-            7: 'Summer', 8: 'Summer', 9: 'Fall', 
-            10: 'Fall', 11: 'Fall', 12: 'Winter'
+            1: 'Sunny', 2: 'Sunny', 3: 'Sunny', 
+            4: 'Rainy', 5: 'Rainy', 6: 'Rainy',
+            7: 'Rainy', 8: 'Rainy', 9: 'Rainy', 
+            10: 'Rainy', 11: 'Sunny', 12: 'Sunny'
         }
         df_features['Donation_Season'] = df_features['Donation_Month'].map(season_mapping)
     

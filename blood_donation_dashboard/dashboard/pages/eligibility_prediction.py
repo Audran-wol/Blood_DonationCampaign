@@ -49,40 +49,103 @@ def show_eligibility_prediction(df):
         selected_model = st.selectbox("Select Model Type", model_options)
         
         # Feature selection
-        feature_cols = [col for col in df.columns if col != 'Eligibility' and df[col].dtype != 'object']
+        feature_cols = [col for col in df.columns if col not in ['Eligibility', 'target'] and pd.api.types.is_numeric_dtype(df[col])]
+        categorical_cols = [col for col in df.columns if col not in ['Eligibility', 'target'] and not pd.api.types.is_numeric_dtype(df[col])]
         
-        if len(feature_cols) > 0:
-            # Allow manual feature selection
-            with st.expander("Select Features for Model Training"):
-                selected_features = st.multiselect(
-                    "Select Features",
-                    options=feature_cols,
-                    default=feature_cols[:min(5, len(feature_cols))]
+        st.markdown("### Feature Selection")
+        
+        # Group features by category
+        feature_categories = {
+            "Demographics": ["Age", "Gender", "Age_Group", "Blood_Type", "Weight"],
+            "Health Indicators": ["Health_Risk_Score", "Antécédent_de_transfusion", "Porteur(HIV,hbs,hcv)", 
+                                 "Opéré", "Drepanocytaire", "Diabétique", "Hypertendus", 
+                                 "Asthmatiques", "Cardiaque", "Tatoué", "Scarifié"],
+            "Donation History": ["Previous_Donation", "Frequency", "Last_Donation_Date"],
+            "Geographic": ["Region", "City", "Distance_to_Center"]
+        }
+        
+        # Get available features from dataframe
+        available_features = {}
+        for category, features in feature_categories.items():
+            available_in_category = [f for f in features if f in df.columns]
+            if available_in_category:
+                available_features[category] = available_in_category
+        
+        # Allow feature category selection
+        selected_categories = st.multiselect(
+            "Select Feature Categories", 
+            options=list(available_features.keys()),
+            default=list(available_features.keys())[:2] if available_features else []
+        )
+        
+        # Compile selected features from categories
+        selected_features = []
+        for category in selected_categories:
+            selected_features.extend(available_features.get(category, []))
+        
+        # Add option to manually select additional numeric features not in categories
+        other_numeric = [col for col in feature_cols if col not in [f for cat_features in available_features.values() for f in cat_features]]
+        if other_numeric:
+            with st.expander("Additional Numeric Features"):
+                selected_other_numeric = st.multiselect(
+                    "Select Additional Features",
+                    options=other_numeric,
+                    default=other_numeric[:min(3, len(other_numeric))]
                 )
+                selected_features.extend(selected_other_numeric)
+        
+        # Add option for categorical features
+        if categorical_cols:
+            with st.expander("Categorical Features"):
+                selected_categorical = st.multiselect(
+                    "Select Categorical Features",
+                    options=categorical_cols,
+                    default=[]
+                )
+                selected_features.extend(selected_categorical)
+        
+        # Check if we have enough features
+        if len(selected_features) < 2:
+            st.warning("Please select at least 2 features for model training.")
+        else:
+            # Display selected features
+            st.write(f"Selected {len(selected_features)} features for model training")
             
-            if len(selected_features) < 2:
-                st.warning("Please select at least 2 features for model training.")
-            else:
-                # Train model on button click
-                if st.button("Train and Evaluate Model"):
-                    with st.spinner("Training model..."):
-                        # Prepare data for modeling
-                        X = df[selected_features]
-                        y = df['Eligibility'].map({'Eligible': 1, 'Ineligible': 0})
+            # Training parameters
+            col1, col2, col3 = st.columns(3)
+            
+            test_size = col1.slider("Test Size (%)", 10, 40, 20) / 100
+            
+            # Train model on button click
+            if st.button("Train and Evaluate Model"):
+                with st.spinner("Training model..."):
+                    try:
+                        # Map model selection to actual model type
+                        model_mapping = {
+                            "Random Forest": "random_forest",
+                            "Logistic Regression": "logistic_regression", 
+                            "Support Vector Machine": "svm",
+                            "Gradient Boosting": "gradient_boosting"
+                        }
+                        model_name = model_mapping.get(selected_model, "random_forest")
                         
-                        # Train model with selected configuration
-                        model_name = selected_model.lower().replace(" ", "_")
+                        # Create a temporary DataFrame with only the selected features and target
+                        model_df = df[selected_features].copy()
+                        model_df['target'] = df['Eligibility'].map({'Eligible': 1, 'Ineligible': 0})
                         
-                        # Create a temporary DataFrame for training
-                        model_df = X.copy()
-                        model_df['target'] = y
+                        st.info(f"Training {selected_model} model with {len(selected_features)} features")
                         
-                        # Train the model
-                        try:
-                            model = train_model(model_df, model_type=model_name)
-                            
+                        # Train the model with the selected features
+                        model = train_model(
+                            data=model_df, 
+                            model_type=model_name,
+                            test_size=test_size,
+                            selected_features=selected_features
+                        )
+                        
+                        if model is not None:
                             # Evaluate model
-                            evaluation_results = evaluate_model(model, X, y)
+                            evaluation_results = model['metrics']
                             
                             # Display performance metrics
                             st.markdown("### Model Performance Metrics")
@@ -93,14 +156,8 @@ def show_eligibility_prediction(df):
                             col3.metric("Recall", f"{evaluation_results['recall']*100:.1f}%")
                             col4.metric("F1 Score", f"{evaluation_results['f1']*100:.1f}%")
                             
-                            # Display ROC curve
-                            if 'auc' in evaluation_results:
-                                st.markdown("### ROC Curve")
-                                roc_fig = visualize_model_performance(model)
-                                st.plotly_chart(roc_fig, use_container_width=True)
-                            
                             # Feature importance
-                            if model and 'feature_importances' in model:
+                            if 'feature_importances' in model and model['feature_importances']:
                                 st.markdown("### Feature Importance")
                                 feature_imp = pd.DataFrame({
                                     'Feature': list(model['feature_importances'].keys()),
@@ -124,11 +181,11 @@ def show_eligibility_prediction(df):
                             st.session_state.selected_features = selected_features
                             
                             st.success("Model trained successfully! You can now make predictions.")
-                        except Exception as e:
-                            st.error(f"Error training model: {str(e)}")
-                            st.info("Try selecting different features or a different model type.")
-        else:
-            st.error("No numeric features available for model training.")
+                        else:
+                            st.error("Model training failed. Check the feature selection.")
+                    except Exception as e:
+                        st.error(f"Error training model: {str(e)}")
+                        st.info("Try selecting different features or a different model type.")
     
     with tab2:
         st.markdown('<div class="sub-header">Predict Donor Eligibility</div>', unsafe_allow_html=True)
@@ -150,28 +207,48 @@ def show_eligibility_prediction(df):
             col1, col2 = st.columns(2)
             
             for i, feature in enumerate(features):
-                # Determine min, max, and default values based on the feature
-                min_val = float(df[feature].min())
-                max_val = float(df[feature].max())
-                default_val = float(df[feature].median())
-                
-                # Place input fields in alternating columns
-                if i % 2 == 0:
-                    input_data[feature] = col1.slider(
-                        f"{feature}",
-                        min_value=min_val,
-                        max_value=max_val,
-                        value=default_val,
-                        step=(max_val - min_val) / 100
-                    )
+                # Check if feature is categorical (non-numeric)
+                if not pd.api.types.is_numeric_dtype(df[feature]):
+                    # For categorical features, use selectbox with unique values
+                    unique_values = df[feature].dropna().unique().tolist()
+                    default_value = unique_values[0] if unique_values else ""
+                    
+                    # Place input fields in alternating columns
+                    if i % 2 == 0:
+                        input_data[feature] = col1.selectbox(
+                            f"{feature}",
+                            options=unique_values,
+                            index=0
+                        )
+                    else:
+                        input_data[feature] = col2.selectbox(
+                            f"{feature}",
+                            options=unique_values,
+                            index=0
+                        )
                 else:
-                    input_data[feature] = col2.slider(
-                        f"{feature}",
-                        min_value=min_val,
-                        max_value=max_val,
-                        value=default_val,
-                        step=(max_val - min_val) / 100
-                    )
+                    # For numeric features, use slider as before
+                    min_val = float(df[feature].min())
+                    max_val = float(df[feature].max())
+                    default_val = float(df[feature].median())
+                    
+                    # Place input fields in alternating columns
+                    if i % 2 == 0:
+                        input_data[feature] = col1.slider(
+                            f"{feature}",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=default_val,
+                            step=(max_val - min_val) / 100
+                        )
+                    else:
+                        input_data[feature] = col2.slider(
+                            f"{feature}",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=default_val,
+                            step=(max_val - min_val) / 100
+                        )
             
             # Make prediction
             if st.button("Predict Eligibility"):
@@ -182,103 +259,70 @@ def show_eligibility_prediction(df):
                     # Make prediction
                     prediction, probability = predict_eligibility(model, input_df)
                     
-                    # Determine eligibility status
-                    eligible = prediction[0] == 1
-                    prob_pct = probability[0][1] * 100 if eligible else (1 - probability[0][1]) * 100
-                    
-                    # Display prediction result with a gauge
-                    st.markdown("### Eligibility Prediction Result")
-                    
-                    # Create a gauge chart for the probability
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=prob_pct,
-                        domain={'x': [0, 1], 'y': [0, 1]},
-                        title={'text': "Probability"},
-                        gauge={
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': "darkgreen" if eligible else "darkred"},
-                            'steps': [
-                                {'range': [0, 30], 'color': "lightgray"},
-                                {'range': [30, 70], 'color': "gray"},
-                                {'range': [70, 100], 'color': "lightgray"}
-                            ],
-                            'threshold': {
-                                'line': {'color': "red", 'width': 4},
-                                'thickness': 0.75,
-                                'value': 50
+                    if prediction is not None:
+                        # Determine eligibility status
+                        eligible = prediction[0] == 1
+                        
+                        # Handle probability correctly depending on format
+                        if isinstance(probability, np.ndarray) and probability.ndim == 2:
+                            # If it's a 2D array of probabilities for each class
+                            prob_pct = probability[0][1] * 100 if eligible else (1 - probability[0][1]) * 100
+                        elif isinstance(probability, np.ndarray) and probability.ndim == 1:
+                            # If it's a 1D array of probabilities for the positive class
+                            prob_pct = probability[0] * 100 if eligible else (1 - probability[0]) * 100
+                        else:
+                            # Default case if probability format is unexpected
+                            prob_pct = 100 if eligible else 0
+                        
+                        # Display prediction result with a gauge
+                        st.markdown("### Eligibility Prediction Result")
+                        
+                        # Create a gauge chart for the probability
+                        fig = go.Figure(go.Indicator(
+                            mode="gauge+number",
+                            value=prob_pct,
+                            title={'text': "Eligibility Probability"},
+                            gauge={
+                                'axis': {'range': [0, 100]},
+                                'bar': {'color': "green" if eligible else "red"},
+                                'steps': [
+                                    {'range': [0, 50], 'color': 'lightcoral'},
+                                    {'range': [50, 100], 'color': 'lightgreen'}
+                                ],
+                                'threshold': {
+                                    'line': {'color': "black", 'width': 4},
+                                    'thickness': 0.75,
+                                    'value': 50
+                                }
                             }
-                        }
-                    ))
-                    
-                    fig.update_layout(height=300)
-                    
-                    # Display eligibility result prominently
-                    if eligible:
-                        st.success(f"### ELIGIBLE ")
-                        st.markdown(f"This donor is predicted to be **eligible** with {prob_pct:.1f}% confidence.")
-                    else:
-                        st.error(f"### INELIGIBLE ")
-                        st.markdown(f"This donor is predicted to be **ineligible** with {prob_pct:.1f}% confidence.")
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Add explanation of results
-                    st.markdown("### Explanation")
-                    
-                    # If model provides feature importance, show contribution of each feature
-                    if 'feature_importances' in model:
-                        feature_importance = pd.DataFrame({
-                            'Feature': features,
-                            'Importance': [model['feature_importances'][feat] for feat in features],
-                            'Value': [input_data[feat] for feat in features]
-                        })
+                        ))
                         
-                        # Sort by importance
-                        feature_importance = feature_importance.sort_values('Importance', ascending=False)
+                        # Update layout
+                        fig.update_layout(
+                            height=300,
+                            margin=dict(l=20, r=20, t=50, b=20),
+                        )
                         
-                        # Show top contributing factors
-                        st.markdown("#### Top Contributing Factors")
+                        st.plotly_chart(fig, use_container_width=True)
                         
-                        for i, row in feature_importance.head(3).iterrows():
-                            feature = row['Feature']
-                            importance = row['Importance']
-                            value = row['Value']
-                            
-                            # Determine if value is high or low compared to distribution
-                            mean_val = df[feature].mean()
-                            std_val = df[feature].std()
-                            
-                            if value > mean_val + std_val:
-                                position = "high"
-                            elif value < mean_val - std_val:
-                                position = "low"
-                            else:
-                                position = "average"
-                            
-                            st.markdown(f"""
-                            - **{feature}**: Value of {value:.2f} is **{position}** 
-                              (importance: {importance:.3f})
-                            """)
+                        # Display eligibility verdict
+                        if eligible:
+                            st.success(f"✅ **ELIGIBLE** for donation with {prob_pct:.1f}% confidence")
+                        else:
+                            st.error(f"❌ **INELIGIBLE** for donation with {prob_pct:.1f}% confidence")
                         
-                        # Provide recommendations if ineligible
+                        # Provide additional recommendations for ineligible donors
                         if not eligible:
-                            st.markdown("#### Recommendations to Improve Eligibility")
-                            
-                            for i, row in feature_importance.head(2).iterrows():
-                                feature = row['Feature']
-                                value = row['Value']
-                                
-                                # Simple recommendation based on whether higher or lower is better
-                                # In a real application, this would be based on domain knowledge
-                                corr = df[[feature, 'Eligibility']].corr().iloc[0, 1]
-                                
-                                if corr > 0:  # Positive correlation
-                                    if value < df[feature].median():
-                                        st.markdown(f"- Consider increasing **{feature}** (current value: {value:.2f})")
-                                else:  # Negative correlation
-                                    if value > df[feature].median():
-                                        st.markdown(f"- Consider decreasing **{feature}** (current value: {value:.2f})")
+                            st.info("Recommendations for improving eligibility:")
+                            st.markdown("""
+                            - Ensure adequate iron levels and overall health
+                            - Wait an appropriate time since last donation (typically 56 days)
+                            - Maintain a healthy weight
+                            - Ensure you meet minimum age requirements
+                            - Consult with healthcare provider about any medical conditions
+                            """)
+                    else:
+                        st.error("Unable to make prediction. Please check your input data or try retraining the model.")
             
             # Add disclaimer
             st.markdown("""

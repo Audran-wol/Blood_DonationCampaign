@@ -298,8 +298,8 @@ def create_campaign_effectiveness_vis(df):
             donations_by_season = donations_by_season.reset_index()
             donations_by_season.columns = ['Season', 'Donations']
             
-            # Ensure seasons are in correct order
-            season_order = ['Winter', 'Spring', 'Summer', 'Fall']
+            # Ensure seasons are in correct order for Cameroon
+            season_order = ['Sunny', 'Rainy']
             donations_by_season['Season'] = pd.Categorical(
                 donations_by_season['Season'],
                 categories=season_order,
@@ -311,16 +311,20 @@ def create_campaign_effectiveness_vis(df):
                 donations_by_season,
                 x='Season',
                 y='Donations',
-                title='Donations by Season',
+                title='Donations by Season in Cameroon',
                 labels={'Season': 'Season', 'Donations': 'Number of Donations'},
                 color='Season',
                 color_discrete_map={
-                    'Winter': '#90CAF9',
-                    'Spring': '#A5D6A7',
-                    'Summer': '#FFCC80',
-                    'Fall': '#EF9A9A'
+                    'Sunny': '#FFD700',  # Gold/yellow for sunny season
+                    'Rainy': '#4682B4'   # SteelBlue for rainy season
                 }
             )
+            
+            fig_season.update_layout(
+                xaxis_title='Season',
+                yaxis_title='Number of Donations'
+            )
+            
             figures['donation_season'] = fig_season
     
     # Demographic effectiveness analysis
