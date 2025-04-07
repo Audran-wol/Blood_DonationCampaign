@@ -220,17 +220,6 @@ def show_campaign_effectiveness(df):
                         tickangle=45
                     )
                     
-                    # Add a trend line
-                    fig.add_traces(
-                        px.scatter(
-                            elig_by_month,
-                            x='YearMonth_dt',  # Use datetime column here too
-                            y='Eligibility',
-                            trendline='lowess',
-                            trendline_color_override='red'
-                        ).data[1]
-                    )
-                    
                     # Improve layout
                     fig.update_layout(
                         yaxis_title='Eligibility Rate (%)',

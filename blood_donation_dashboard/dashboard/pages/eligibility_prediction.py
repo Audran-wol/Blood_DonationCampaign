@@ -16,7 +16,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Import custom modules
-from scripts.prediction_model import train_model, evaluate_model, predict_eligibility
+from scripts.prediction_model import train_model, evaluate_model, predict_eligibility, train_eligibility_model
 from scripts.visualization import create_prediction_vis
 
 def show_eligibility_prediction(df):
@@ -207,30 +207,71 @@ def show_eligibility_prediction(df):
             col1, col2 = st.columns(2)
             
             for i, feature in enumerate(features):
-                # Check if feature is categorical (non-numeric)
-                if not pd.api.types.is_numeric_dtype(df[feature]):
-                    # For categorical features, use selectbox with unique values
-                    unique_values = df[feature].dropna().unique().tolist()
-                    default_value = unique_values[0] if unique_values else ""
+                # Identify health condition features that should be boolean/categorical
+                health_conditions = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré', 
+                                    'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
+                                    'Cardiaque', 'Tatoué', 'Scarifié']
+                
+                # Check if feature is categorical (non-numeric) or should be treated as categorical
+                if feature in health_conditions or not pd.api.types.is_numeric_dtype(df[feature]):
+                    # For categorical features, use selectbox with appropriate values
+                    if feature in health_conditions:
+                        # Health conditions should be Yes/No choices
+                        options = ['Non', 'Oui'] if 'Oui' in df[feature].unique() else ['No', 'Yes']
+                        default_idx = 0  # Default to 'No'/'Non'
+                    else:
+                        # For other categorical features, use unique values from dataset
+                        unique_values = df[feature].dropna().unique().tolist()
+                        options = unique_values
+                        default_idx = 0 if unique_values else 0
                     
                     # Place input fields in alternating columns
                     if i % 2 == 0:
                         input_data[feature] = col1.selectbox(
                             f"{feature}",
-                            options=unique_values,
-                            index=0
+                            options=options,
+                            index=default_idx,
+                            help="Select appropriate value"
                         )
                     else:
                         input_data[feature] = col2.selectbox(
                             f"{feature}",
-                            options=unique_values,
-                            index=0
+                            options=options,
+                            index=default_idx,
+                            help="Select appropriate value"
+                        )
+                # Special handling for Health_Risk_Score
+                elif feature == 'Health_Risk_Score':
+                    min_val = 0.0  # Health risk score should start at 0
+                    max_val = float(df[feature].max())
+                    default_val = 0.0  # Default to 0 (healthy)
+                    
+                    if i % 2 == 0:
+                        input_data[feature] = col1.slider(
+                            f"{feature}",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=default_val,
+                            step=1.0,  # Use whole numbers for risk score
+                            help="Health risk score (higher values indicate greater health risks)"
+                        )
+                    else:
+                        input_data[feature] = col2.slider(
+                            f"{feature}",
+                            min_value=min_val,
+                            max_value=max_val,
+                            value=default_val,
+                            step=1.0,  # Use whole numbers for risk score
+                            help="Health risk score (higher values indicate greater health risks)"
                         )
                 else:
-                    # For numeric features, use slider as before
+                    # For other numeric features, use slider
                     min_val = float(df[feature].min())
                     max_val = float(df[feature].max())
                     default_val = float(df[feature].median())
+                    
+                    # For age, use whole numbers
+                    step = 1.0 if feature == 'Age' else (max_val - min_val) / 100
                     
                     # Place input fields in alternating columns
                     if i % 2 == 0:
@@ -239,7 +280,8 @@ def show_eligibility_prediction(df):
                             min_value=min_val,
                             max_value=max_val,
                             value=default_val,
-                            step=(max_val - min_val) / 100
+                            step=step,
+                            help=f"Enter value for {feature}"
                         )
                     else:
                         input_data[feature] = col2.slider(
@@ -247,82 +289,150 @@ def show_eligibility_prediction(df):
                             min_value=min_val,
                             max_value=max_val,
                             value=default_val,
-                            step=(max_val - min_val) / 100
+                            step=step,
+                            help=f"Enter value for {feature}"
                         )
             
-            # Make prediction
+            # Add a button to make predictions
             if st.button("Predict Eligibility"):
-                with st.spinner("Making prediction..."):
-                    # Create input dataframe
-                    input_df = pd.DataFrame([input_data])
+                # Train model with selected features
+                model_result = train_eligibility_model(df, model_type=selected_model, selected_features=features)
+                
+                if model_result:
+                    # Get prediction from model
+                    def predict_with_input_data(model_result, input_data):
+                        """Get prediction for the input data"""
+                        if model_result is None:
+                            st.error("Model not loaded. Please train the model first.")
+                            return None, None, None
+                        
+                        # Make prediction
+                        try:
+                            prediction, probability, explanation = predict_eligibility(model_result, input_data)
+                            return prediction, probability, explanation
+                        except Exception as e:
+                            st.error(f"Error making prediction: {e}")
+                            return None, None, None
+                    
+                    # Display prediction result
+                    def display_prediction_result(prediction, probability, explanation, feature_importances=None):
+                        """Display the prediction result with explanation"""
+                        if prediction is None:
+                            st.error("Could not make a prediction. Please check the input data.")
+                            return
+                        
+                        # Get formatted probability
+                        prob_formatted = f"{probability:.1%}" if probability is not None else "Unknown"
+                        
+                        # Create visually appealing prediction display
+                        col1, col2 = st.columns([1, 3])
+                        
+                        with col1:
+                            # Display a circular indicator with percentage
+                            if prediction == 1:
+                                fig = go.Figure(go.Indicator(
+                                    mode="gauge+number",
+                                    value=probability*100,
+                                    domain={'x': [0, 1], 'y': [0, 1]},
+                                    title={'text': "Eligibility"},
+                                    gauge={
+                                        'axis': {'range': [0, 100]},
+                                        'bar': {'color': "green"},
+                                        'threshold': {
+                                            'line': {'color': "green", 'width': 4},
+                                            'thickness': 0.75,
+                                            'value': 80
+                                        }
+                                    }
+                                ))
+                            else:
+                                fig = go.Figure(go.Indicator(
+                                    mode="gauge+number",
+                                    value=(1-probability)*100,
+                                    domain={'x': [0, 1], 'y': [0, 1]},
+                                    title={'text': "Not Eligible"},
+                                    gauge={
+                                        'axis': {'range': [0, 100]},
+                                        'bar': {'color': "red"},
+                                        'threshold': {
+                                            'line': {'color': "red", 'width': 4},
+                                            'thickness': 0.75,
+                                            'value': 80
+                                        }
+                                    }
+                                ))
+                            
+                            fig.update_layout(height=250, width=250)
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        with col2:
+                            # Display the prediction result
+                            if prediction == 1:
+                                st.success(f"### Prediction: ELIGIBLE (Probability: {prob_formatted})")
+                            else:
+                                st.error(f"### Prediction: NOT ELIGIBLE (Probability: {prob_formatted})")
+                            
+                            # Display explanation if available (abbreviated version)
+                            if explanation:
+                                st.markdown("### Key Factors:")
+                                # Extract the first few lines of the explanation to show here
+                                key_points = "\n".join(explanation.split("\n")[:5])
+                                st.markdown(key_points)
+                        
+                        # Display full explanation if available
+                        if explanation:
+                            with st.expander("View Full Explanation"):
+                                st.markdown(explanation)
+                        
+                        # Display feature importances if available
+                        if feature_importances and isinstance(feature_importances, dict) and len(feature_importances) > 0:
+                            with st.expander("View Feature Importance Chart"):
+                                importances = pd.DataFrame({
+                                    'Feature': list(feature_importances.keys()),
+                                    'Importance': list(feature_importances.values())
+                                })
+                                
+                                # Sort by importance
+                                importances = importances.sort_values('Importance', ascending=False).head(10)
+                                
+                                # Create bar chart
+                                fig = px.bar(
+                                    importances, 
+                                    x='Importance', 
+                                    y='Feature', 
+                                    orientation='h',
+                                    title='Top 10 Feature Importances'
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Process the prediction and display results
+                    def process_prediction(model_result, input_data):
+                        """Process the prediction and display results"""
+                        # Make prediction
+                        prediction, probability, explanation = predict_with_input_data(model_result, input_data)
+                        
+                        # Display prediction result
+                        display_prediction_result(prediction, probability, explanation, 
+                                                 model_result.get('feature_importances') if model_result else None)
+                        
+                        return prediction, probability
                     
                     # Make prediction
-                    prediction, probability = predict_eligibility(model, input_df)
+                    prediction, probability = process_prediction(model_result, input_data)
                     
-                    if prediction is not None:
-                        # Determine eligibility status
-                        eligible = prediction[0] == 1
-                        
-                        # Handle probability correctly depending on format
-                        if isinstance(probability, np.ndarray) and probability.ndim == 2:
-                            # If it's a 2D array of probabilities for each class
-                            prob_pct = probability[0][1] * 100 if eligible else (1 - probability[0][1]) * 100
-                        elif isinstance(probability, np.ndarray) and probability.ndim == 1:
-                            # If it's a 1D array of probabilities for the positive class
-                            prob_pct = probability[0] * 100 if eligible else (1 - probability[0]) * 100
-                        else:
-                            # Default case if probability format is unexpected
-                            prob_pct = 100 if eligible else 0
-                        
-                        # Display prediction result with a gauge
-                        st.markdown("### Eligibility Prediction Result")
-                        
-                        # Create a gauge chart for the probability
-                        fig = go.Figure(go.Indicator(
-                            mode="gauge+number",
-                            value=prob_pct,
-                            title={'text': "Eligibility Probability"},
-                            gauge={
-                                'axis': {'range': [0, 100]},
-                                'bar': {'color': "green" if eligible else "red"},
-                                'steps': [
-                                    {'range': [0, 50], 'color': 'lightcoral'},
-                                    {'range': [50, 100], 'color': 'lightgreen'}
-                                ],
-                                'threshold': {
-                                    'line': {'color': "black", 'width': 4},
-                                    'thickness': 0.75,
-                                    'value': 50
-                                }
-                            }
-                        ))
-                        
-                        # Update layout
-                        fig.update_layout(
-                            height=300,
-                            margin=dict(l=20, r=20, t=50, b=20),
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Display eligibility verdict
-                        if eligible:
-                            st.success(f"✅ **ELIGIBLE** for donation with {prob_pct:.1f}% confidence")
-                        else:
-                            st.error(f"❌ **INELIGIBLE** for donation with {prob_pct:.1f}% confidence")
-                        
-                        # Provide additional recommendations for ineligible donors
-                        if not eligible:
-                            st.info("Recommendations for improving eligibility:")
-                            st.markdown("""
-                            - Ensure adequate iron levels and overall health
-                            - Wait an appropriate time since last donation (typically 56 days)
-                            - Maintain a healthy weight
-                            - Ensure you meet minimum age requirements
-                            - Consult with healthcare provider about any medical conditions
-                            """)
-                    else:
-                        st.error("Unable to make prediction. Please check your input data or try retraining the model.")
+                    # Provide additional recommendations for ineligible donors
+                    if prediction == 0:
+                        st.info("Recommendations for improving eligibility:")
+                        st.markdown("""
+                        - Ensure adequate iron levels and overall health
+                        - Wait an appropriate time since last donation (typically 56 days)
+                        - Maintain a healthy weight
+                        - Ensure you meet minimum age requirements
+                        - Consult with healthcare provider about any medical conditions
+                        """)
+                else:
+                    st.error("Model training failed. Please check the console for details.")
             
             # Add disclaimer
             st.markdown("""

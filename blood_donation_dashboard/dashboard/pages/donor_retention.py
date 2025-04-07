@@ -94,68 +94,44 @@ def show_donor_retention(df):
                     break
             
             if date_col and pd.api.types.is_datetime64_dtype(df[date_col]):
-                st.markdown("### Retention Rate Over Time")
+                # Calculate some basic retention metrics by year or month instead
+                df['Year'] = pd.to_datetime(df[date_col]).dt.year
+                retention_by_year = df.groupby('Year')['Previous_Donation'].apply(
+                    lambda x: (x == 'Yes').mean() * 100
+                ).reset_index()
                 
-                try:
-                    # Calculate retention by time period
-                    df['YearMonth'] = pd.to_datetime(df[date_col]).dt.strftime('%Y-%m')
+                if not retention_by_year.empty:
+                    st.markdown("### Retention Rate by Year")
                     
-                    # Calculate retention by time period
-                    retention_by_time = df.groupby('YearMonth')['Previous_Donation'].apply(
-                        lambda x: (x == 'Yes').mean() * 100
-                    ).reset_index()
-                    
-                    # Convert YearMonth to datetime for proper sorting and plotting
-                    retention_by_time['YearMonth_dt'] = pd.to_datetime(retention_by_time['YearMonth'] + '-01')
-                    
-                    # Sort by year and month for proper chronological display
-                    retention_by_time = retention_by_time.sort_values('YearMonth_dt')
-                    
-                    # Create line chart using the datetime column for x-axis
-                    fig = px.line(
-                        retention_by_time,
-                        x='YearMonth_dt',  # Use the datetime version for plotting
+                    # Simple bar chart of retention by year (no trend line that requires statsmodels)
+                    fig = px.bar(
+                        retention_by_year,
+                        x='Year',
                         y='Previous_Donation',
-                        title='Donor Retention Rate by Month',
+                        title='Donor Retention Rate by Year',
                         labels={
-                            'YearMonth_dt': 'Month',
+                            'Year': 'Year',
                             'Previous_Donation': 'Retention Rate (%)'
-                        },
-                        markers=True
-                    )
-                    
-                    # Format x-axis to show month and year
-                    fig.update_xaxes(
-                        tickformat="%b %Y",
-                        dtick="M1",
-                        tickangle=45
-                    )
-                    
-                    # Add trend line
-                    fig.add_traces(
-                        px.scatter(
-                            retention_by_time,
-                            x='YearMonth_dt',
-                            y='Previous_Donation',
-                            trendline='lowess',
-                            trendline_color_override='red'
-                        ).data[1]
+                        }
                     )
                     
                     # Add target threshold line at 50%
                     fig.add_shape(
                         type='line',
-                        x0=retention_by_time['YearMonth_dt'].min(),
+                        x0=retention_by_year['Year'].min() - 0.5,
                         y0=50,
-                        x1=retention_by_time['YearMonth_dt'].max(),
+                        x1=retention_by_year['Year'].max() + 0.5,
                         y1=50,
                         line=dict(color='green', width=2, dash='dash')
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig.update_layout(
+                        xaxis_title='Year',
+                        yaxis_title='Retention Rate (%)',
+                        yaxis=dict(range=[0, 100])
+                    )
                     
-                except Exception as e:
-                    st.error(f"Error creating retention time series: {e}")
+                    st.plotly_chart(fig, use_container_width=True)
             
             # Retention by eligibility status
             if 'Eligibility' in df.columns:

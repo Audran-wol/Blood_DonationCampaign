@@ -131,191 +131,206 @@ def train_eligibility_model(df, model_type='rf', test_size=0.2, selected_feature
     dict
         Dictionary with model, pipeline, metrics, and feature importances
     """
-    # Print information for debugging
-    print(f"Starting model training with {model_type} model")
-    print(f"Dataframe shape: {df.shape}")
-    if selected_features:
-        print(f"Selected features: {selected_features}")
-    
-    # Prepare data
-    X, y, features = prepare_data_for_modeling(df, selected_features)
-    
-    if X is None or y is None:
-        print("Data preparation failed, no features or target available")
-        return None
-    
-    print(f"After preparation: X shape={X.shape}, features={features}")
-    
-    # Split into train and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
-    
-    # Identify numeric and categorical features
-    numeric_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
-    categorical_features = X.select_dtypes(include=['object', 'category']).columns.tolist()
-    
-    print(f"Numeric features: {numeric_features}")
-    print(f"Categorical features: {categorical_features}")
-    
-    # Create preprocessing pipeline
-    transformers = []
-    
-    if numeric_features:
-        transformers.append(('num', StandardScaler(), numeric_features))
-    
-    if categorical_features:
-        transformers.append(('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features))
-    
-    if not transformers:
-        print("No transformers could be created. Check your feature types.")
-        return None
-    
-    preprocessor = ColumnTransformer(transformers, remainder='drop')
-    
-    # Select and configure model
-    if model_type == 'random_forest' or model_type == 'rf':
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        param_grid = {
-            'classifier__n_estimators': [50, 100],
-            'classifier__max_depth': [None, 10, 20],
-            'classifier__min_samples_split': [2, 5]
-        }
-    elif model_type == 'gradient_boosting' or model_type == 'gb':
-        model = GradientBoostingClassifier(n_estimators=100, random_state=42)
-        param_grid = {
-            'classifier__n_estimators': [50, 100],
-            'classifier__learning_rate': [0.01, 0.1],
-            'classifier__max_depth': [3, 5]
-        }
-    elif model_type == 'logistic_regression' or model_type == 'lr':
-        model = LogisticRegression(max_iter=1000, random_state=42)
-        param_grid = {
-            'classifier__C': [0.1, 1.0, 10.0],
-            'classifier__solver': ['liblinear', 'saga']
-        }
-    else:  # default to logistic regression
-        print(f"Unknown model type: {model_type}, defaulting to Logistic Regression")
-        model = LogisticRegression(max_iter=1000, random_state=42)
-        param_grid = {
-            'classifier__C': [0.1, 1.0, 10.0],
-            'classifier__solver': ['liblinear', 'saga']
-        }
-    
-    # Create full pipeline
-    pipeline = Pipeline([
-        ('preprocessor', preprocessor),
-        ('classifier', model)
-    ])
-    
-    # Perform grid search if there's enough data
-    if len(X_train) >= 100 and len(X_train) > 10 * len(features):
-        try:
-            print("Performing grid search...")
-            grid_search = GridSearchCV(pipeline, param_grid, cv=5, scoring='f1')
-            grid_search.fit(X_train, y_train)
-            best_pipeline = grid_search.best_estimator_
-            print(f"Grid search complete. Best params: {grid_search.best_params_}")
-        except Exception as e:
-            print(f"Grid search failed: {e}. Falling back to default model.")
-            pipeline.fit(X_train, y_train)
-            best_pipeline = pipeline
+    # Normalize model type naming
+    model_type = model_type.lower()
+    if model_type in ['rf', 'random_forest', 'randomforest']:
+        model_type = 'random_forest'
+    elif model_type in ['gb', 'gradient_boosting', 'gradientboosting']:
+        model_type = 'gradient_boosting'
+    elif model_type in ['lr', 'logistic_regression', 'logisticregression']:
+        model_type = 'logistic_regression'
+    elif model_type in ['svm', 'support_vector_machine', 'supportvectormachine']:
+        model_type = 'svm'
     else:
-        # Just fit with default parameters if data is limited
-        print("Using default parameters (data is limited or high-dimensional)")
-        pipeline.fit(X_train, y_train)
-        best_pipeline = pipeline
-    
-    # Evaluate model
-    y_pred = best_pipeline.predict(X_test)
-    y_proba = best_pipeline.predict_proba(X_test)[:, 1] if hasattr(best_pipeline, 'predict_proba') else None
-    
-    # Calculate metrics
-    metrics = {
-        'accuracy': accuracy_score(y_test, y_pred),
-        'precision': precision_score(y_test, y_pred, zero_division=0),
-        'recall': recall_score(y_test, y_pred, zero_division=0),
-        'f1': f1_score(y_test, y_pred, zero_division=0),
-        'confusion_matrix': confusion_matrix(y_test, y_pred).tolist()
-    }
-    
-    # Get feature importances if applicable
-    feature_importances = {}
+        # Default to random forest if unrecognized
+        model_type = 'random_forest'
     
     try:
-        if model_type in ['rf', 'gb', 'random_forest', 'gradient_boosting']:
-            # Extract feature names after one-hot encoding
-            final_feature_names = []
-            
-            # Get numeric features directly
-            if numeric_features:
-                final_feature_names.extend(numeric_features)
-            
-            # Get transformed categorical feature names
-            if categorical_features:
-                try:
-                    for i, (name, transformer, column) in enumerate(preprocessor.transformers_):
-                        if name == 'cat':
-                            cat_feature_names = transformer.get_feature_names_out(input_features=transformer.feature_names_in_)
-                            final_feature_names.extend(cat_feature_names)
-                except Exception as e:
-                    print(f"Error getting categorical feature names: {e}")
-            
-            # Get importances
-            importances = best_pipeline.named_steps['classifier'].feature_importances_
-            
-            # Check lengths match
-            if len(importances) == len(final_feature_names):
-                for i, importance in enumerate(importances):
-                    feature_importances[final_feature_names[i]] = importance
-            else:
-                print(f"Warning: Feature importances length ({len(importances)}) doesn't match feature names length ({len(final_feature_names)})")
-                # Just use index as feature name
-                for i, importance in enumerate(importances):
-                    feature_importances[f"feature_{i}"] = importance
+        print(f"Training eligibility model using {model_type}")
         
-        elif model_type in ['lr', 'logistic_regression']:
-            # Similar approach but with coefficients instead of feature_importances_
-            final_feature_names = []
+        # Prepare the data
+        X, y, features = prepare_data_for_modeling(df, selected_features)
+        
+        if X is None or y is None:
+            print("Failed to prepare data for modeling")
+            return None
             
-            # Get numeric features directly
-            if numeric_features:
-                final_feature_names.extend(numeric_features)
-            
-            # Get transformed categorical feature names
-            if categorical_features:
-                try:
-                    for i, (name, transformer, column) in enumerate(preprocessor.transformers_):
-                        if name == 'cat':
-                            cat_feature_names = transformer.get_feature_names_out(input_features=transformer.feature_names_in_)
-                            final_feature_names.extend(cat_feature_names)
-                except Exception as e:
-                    print(f"Error getting categorical feature names: {e}")
-            
-            # Get coefficients
-            coefficients = best_pipeline.named_steps['classifier'].coef_[0]
-            
-            # Check lengths match
-            if len(coefficients) == len(final_feature_names):
-                for i, coef in enumerate(coefficients):
-                    feature_importances[final_feature_names[i]] = abs(coef)  # Use absolute value
-            else:
-                print(f"Warning: Coefficients length ({len(coefficients)}) doesn't match feature names length ({len(final_feature_names)})")
-                # Just use index as feature name
-                for i, coef in enumerate(coefficients):
-                    feature_importances[f"feature_{i}"] = abs(coef)
+        # Print the features used
+        print(f"Using features: {features}")
+        
+        # Ensure special preprocessing for health condition features
+        # Convert them to binary (0/1) values
+        health_conditions = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré', 
+                             'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
+                             'Cardiaque', 'Tatoué', 'Scarifié']
+        
+        for feature in health_conditions:
+            if feature in X.columns:
+                # Convert any non-zero value to 1
+                X[feature] = X[feature].apply(lambda x: 1 if x in [1, '1', 'Yes', 'Oui', True] else 0)
+        
+        # Split the data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
+        
+        # Identify numeric and categorical features
+        numeric_features = X.select_dtypes(include=['int64', 'float64']).columns.tolist()
+        categorical_features = [f for f in X.columns if f not in numeric_features]
+        
+        # Store training data columns for feature alignment during prediction
+        training_columns = X.columns.tolist()
+        
+        # Create transformers
+        numeric_transformer = Pipeline(steps=[
+            ('scaler', StandardScaler())
+        ])
+        
+        categorical_transformer = Pipeline(steps=[
+            ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+        ])
+        
+        # Combine transformers
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ('num', numeric_transformer, numeric_features),
+                ('cat', categorical_transformer, categorical_features)
+            ],
+            remainder='passthrough'
+        )
+        
+        # Select model based on type
+        if model_type == 'random_forest':
+            # Tune RF to prevent overfitting to Health_Risk_Score
+            model = RandomForestClassifier(
+                n_estimators=100, 
+                max_depth=5,  # Limit depth to prevent overfitting
+                min_samples_split=5,  # Require more samples to split
+                min_samples_leaf=2,
+                class_weight='balanced',  # Balance classes
+                random_state=42
+            )
+        elif model_type == 'gradient_boosting':
+            model = GradientBoostingClassifier(
+                n_estimators=100,
+                learning_rate=0.05,  # Lower learning rate
+                max_depth=3,  # Shallow trees
+                min_samples_split=5,
+                random_state=42
+            )
+        elif model_type == 'logistic_regression':
+            model = LogisticRegression(
+                C=1.0,  # Regularization strength
+                class_weight='balanced',  # Balance classes
+                solver='liblinear',
+                random_state=42
+            )
+        elif model_type == 'svm':
+            from sklearn.svm import SVC
+            model = SVC(
+                C=1.0,
+                kernel='rbf',
+                probability=True,
+                class_weight='balanced',
+                random_state=42
+            )
+        else:
+            # Default to Random Forest
+            model = RandomForestClassifier(n_estimators=100, random_state=42)
+        
+        # Create pipeline
+        pipeline = Pipeline(steps=[
+            ('preprocessor', preprocessor),
+            ('model', model)
+        ])
+        
+        # Fit the model
+        print("Fitting model...")
+        pipeline.fit(X_train, y_train)
+        
+        # Track the feature names after transformation
+        # Store preprocessed X_train data for reference during prediction
+        # This helps ensure the same features are used
+        X_train_transformed = preprocessor.transform(X_train)
+        
+        # Make predictions on test set
+        y_pred = pipeline.predict(X_test)
+        
+        # Calculate metrics
+        metrics = {
+            'accuracy': accuracy_score(y_test, y_pred),
+            'precision': precision_score(y_test, y_pred, zero_division=0),
+            'recall': recall_score(y_test, y_pred, zero_division=0),
+            'f1': f1_score(y_test, y_pred, zero_division=0),
+            'confusion_matrix': confusion_matrix(y_test, y_pred).tolist()
+        }
+        
+        # Extract feature importances if available
+        feature_importances = {}
+        if hasattr(model, 'feature_importances_'):
+            # For tree-based models
+            try:
+                # Extract importances directly from the model
+                importances = pipeline.named_steps['model'].feature_importances_
+                
+                # Create a simple mapping of feature index to importance value
+                feature_importances = {f"feature_{i}": imp for i, imp in enumerate(importances)}
+                
+                # Now try to map the original feature names to importances
+                # This is complex because of OneHotEncoding, but we can give our best effort
+                if numeric_features:
+                    # Match numeric features to their respective importances
+                    for i, feature in enumerate(numeric_features):
+                        if i < len(importances):
+                            feature_importances[feature] = importances[i]
+                
+            except Exception as e:
+                print(f"Error extracting feature importances: {e}")
+                # Fallback - just use indices
+                importances = pipeline.named_steps['model'].feature_importances_
+                feature_importances = {f"feature_{i}": imp for i, imp in enumerate(importances)}
+                
+        elif hasattr(model, 'coef_'):
+            # For linear models like logistic regression
+            try:
+                # Extract coefficients directly from the model
+                coefs = pipeline.named_steps['model'].coef_[0]
+                
+                # Create a simple mapping of feature index to coefficient value
+                feature_importances = {f"feature_{i}": abs(c) for i, c in enumerate(coefs)}
+                
+                # Now try to map the original feature names to coefficients
+                if numeric_features:
+                    # Match numeric features to their respective coefficients
+                    for i, feature in enumerate(numeric_features):
+                        if i < len(coefs):
+                            feature_importances[feature] = abs(coefs[i])
+                
+            except Exception as e:
+                print(f"Error extracting feature importances: {e}")
+                # Fallback - just use indices
+                coefs = pipeline.named_steps['model'].coef_[0]
+                feature_importances = {f"feature_{i}": abs(c) for i, c in enumerate(coefs)}
+        
+        # Print metrics
+        print(f"Model metrics: Accuracy = {metrics['accuracy']:.4f}, F1 = {metrics['f1']:.4f}")
+        
+        # Return model and metrics with additional information for prediction
+        return {
+            'model': pipeline,
+            'metrics': metrics,
+            'feature_importances': feature_importances,
+            'features': features,
+            'X_test': X_test,
+            'training_columns': training_columns,
+            'numeric_features': numeric_features,
+            'categorical_features': categorical_features,
+            'y_test': y_test
+        }
+        
     except Exception as e:
-        print(f"Could not extract feature importances: {e}")
-    
-    # Print results summary
-    print(f"Model training complete. Metrics: Accuracy={metrics['accuracy']:.4f}, F1={metrics['f1']:.4f}")
-    
-    # Return results
-    return {
-        'model': best_pipeline,
-        'metrics': metrics,
-        'feature_importances': feature_importances,
-        'features': features,
-        'test_data': {'X': X_test, 'y': y_test}
-    }
+        print(f"Error training eligibility model: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 def train_model(data, model_type='rf', test_size=0.2, target=None, selected_features=None):
     """
@@ -495,61 +510,186 @@ def load_model(filepath='../models/eligibility_model.pkl'):
         print(f"Error loading model: {e}")
         return None
 
-def predict_eligibility(model, input_data):
+def predict_eligibility(model_result, input_data):
     """
     Predict eligibility for new donor data.
     
     Parameters:
     -----------
-    model : object
-        Trained model pipeline
-    input_data : pd.DataFrame
-        Input data for prediction
+    model_result : dict
+        Dictionary returned by train_eligibility_model
+    input_data : dict
+        Dictionary with feature values for a new donor
         
     Returns:
     --------
     tuple
-        (predictions, probabilities) or (None, None) if prediction failed
+        (prediction, probability, prediction_explanation)
     """
-    if model is None or input_data is None or input_data.empty:
-        print("Model or input data is None or empty")
-        return None, None
-    
     try:
-        # Print debugging information
-        print(f"Input data shape: {input_data.shape}")
-        print(f"Input data columns: {input_data.columns.tolist()}")
-        print(f"Input data types: {input_data.dtypes}")
+        # Check if model_result is valid
+        if not model_result or not isinstance(model_result, dict):
+            print("Invalid model result")
+            return None, None, "Invalid model"
+            
+        # Get model, features from result
+        pipeline = model_result.get('model')  # Use the entire pipeline
+        features = model_result.get('features')
+        feature_importances = model_result.get('feature_importances', {})
         
-        # Check if model pipeline has a feature list we should verify against
-        required_features = model.get('features', None)
-        if required_features is not None:
-            # If model has a features list, ensure input data matches
-            missing_features = [f for f in required_features if f not in input_data.columns]
-            if missing_features:
-                print(f"Missing required features: {missing_features}")
-                return None, None
+        if not pipeline or not features:
+            print("Missing pipeline or features in model result")
+            return None, None, "Missing model components"
         
-        # Get the actual model pipeline
-        model_pipeline = model.get('model', model)
+        # Convert input_data to dataframe with correct feature order
+        input_df = pd.DataFrame([input_data])
         
-        # Make predictions using the model pipeline
-        print("Making prediction...")
-        predictions = model_pipeline.predict(input_data)
+        # Preprocess health condition inputs
+        health_conditions = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré', 
+                            'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
+                            'Cardiaque', 'Tatoué', 'Scarifié']
         
-        # Get probabilities if available
-        probabilities = None
-        if hasattr(model_pipeline, 'predict_proba'):
-            probabilities = model_pipeline.predict_proba(input_data)
+        # Convert health condition Yes/No or Oui/Non to binary values for prediction
+        for feature in health_conditions:
+            if feature in input_df.columns:
+                # Convert Oui/Yes to 1 and Non/No to 0
+                if input_df[feature].iloc[0] in ['Oui', 'Yes']:
+                    input_df[feature] = 1
+                else:
+                    input_df[feature] = 0
         
-        print(f"Prediction successful. Result: {predictions}")
-        return predictions, probabilities
-    
+        # Only select the features that were used for model training
+        # This is critical to avoid the feature mismatch error
+        available_features = [f for f in features if f in input_df.columns]
+        if len(available_features) != len(features):
+            print(f"Warning: Only {len(available_features)}/{len(features)} features available")
+            missing_features = [f for f in features if f not in input_df.columns]
+            print(f"Missing features: {missing_features}")
+        
+        # Select only the features required by the model
+        input_df = input_df[available_features]
+        
+        # Make prediction using the full pipeline
+        # The pipeline will handle the preprocessing automatically
+        try:
+            prediction = pipeline.predict(input_df)[0]
+            probability = pipeline.predict_proba(input_df)[0][1]  # Probability of class 1
+            
+            # Generate explanation based on feature importances
+            explanation = generate_prediction_explanation(
+                prediction, 
+                probability, 
+                input_df, 
+                feature_importances
+            )
+            
+            return prediction, probability, explanation
+        except ValueError as e:
+            # If there's still a feature mismatch, try a more direct approach
+            print(f"Error in pipeline prediction: {e}")
+            print("Attempting alternative prediction approach...")
+            
+            # If we're at this point, we need to manually apply the preprocessing
+            # by getting the training data columns and adapting our input
+            if 'X_test' in model_result:
+                # Get the column names used during training
+                X_test = model_result.get('X_test')
+                model_features = X_test.columns.tolist()
+                
+                # Create a DataFrame with zeros for all model features
+                aligned_input = pd.DataFrame(0, index=[0], columns=model_features)
+                
+                # Fill in the available values from the input data
+                for col in input_df.columns:
+                    if col in aligned_input.columns:
+                        aligned_input[col] = input_df[col].values
+                
+                # Try prediction again with the aligned input
+                model_only = pipeline.named_steps.get('model', pipeline)
+                prediction = model_only.predict(aligned_input)[0]
+                probability = model_only.predict_proba(aligned_input)[0][1]
+                
+                explanation = "Prediction made with limited feature matching. Results may be less accurate."
+                return prediction, probability, explanation
+            else:
+                return None, None, f"Error: {str(e)}"
+        
     except Exception as e:
-        print(f"Error making predictions: {e}")
+        print(f"Error in prediction: {e}")
         import traceback
         traceback.print_exc()
-        return None, None
+        return None, None, f"Error: {str(e)}"
+
+def generate_prediction_explanation(prediction, probability, input_data, feature_importances):
+    """
+    Generate a human-readable explanation for the prediction.
+    
+    Parameters:
+    -----------
+    prediction : int
+        Predicted class (0 or 1)
+    probability : float
+        Probability of positive class
+    input_data : pd.DataFrame
+        Input data used for prediction
+    feature_importances : dict
+        Feature importances from the model
+        
+    Returns:
+    --------
+    str
+        Human-readable explanation
+    """
+    try:
+        # Sort features by importance
+        sorted_features = sorted(
+            feature_importances.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )
+        
+        # Get top 5 most important features
+        top_features = sorted_features[:5]
+        
+        # Initialize explanation
+        if prediction == 1:
+            explanation = f"Donor predicted as ELIGIBLE with {probability:.1%} confidence.\n\n"
+        else:
+            explanation = f"Donor predicted as NOT ELIGIBLE with {(1-probability):.1%} confidence.\n\n"
+        
+        explanation += "Top factors influencing this prediction:\n"
+        
+        # Add top features to explanation
+        for feature_name, importance in top_features:
+            # Clean up feature name if it's from one-hot encoding
+            display_name = feature_name
+            if '_x0_' in feature_name or '_x1_' in feature_name:
+                base_name = feature_name.split('_x')[0]
+                value = feature_name.split('_x')[1].split('_')[1]
+                display_name = f"{base_name} = {value}"
+            
+            # Try to get the actual value from input data
+            value = None
+            # Check if the exact feature name exists in input_data
+            if feature_name in input_data.columns:
+                value = input_data[feature_name].iloc[0]
+            # For one-hot encoded features, check if base name exists
+            elif '_x0_' in feature_name or '_x1_' in feature_name:
+                base_name = feature_name.split('_x')[0]
+                if base_name in input_data.columns:
+                    value = input_data[base_name].iloc[0]
+            
+            if value is not None:
+                explanation += f"- {display_name} (value: {value}, importance: {importance:.3f})\n"
+            else:
+                explanation += f"- {display_name} (importance: {importance:.3f})\n"
+        
+        explanation += "\nNote: The higher the importance value, the more influence that factor has on the prediction."
+        
+        return explanation
+    except Exception as e:
+        print(f"Error generating explanation: {e}")
+        return f"Prediction made, but could not generate explanation: {str(e)}"
 
 def visualize_model_performance(model_result):
     """
