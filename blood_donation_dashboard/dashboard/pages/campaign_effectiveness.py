@@ -109,9 +109,19 @@ def show_campaign_effectiveness(df):
                 if 'donation_day' in time_figs:
                     st.plotly_chart(time_figs['donation_day'], use_container_width=True)
                 
-                # Seasonal pattern
-                if 'donation_season' in time_figs:
-                    st.plotly_chart(time_figs['donation_season'], use_container_width=True)
+                # Blood type and phenotype analysis
+                st.markdown("### Blood Type and Phenotype Analysis")
+                
+                bt_cols = st.columns(2)
+                
+                if 'blood_type_distribution' in time_figs:
+                    bt_cols[0].plotly_chart(time_figs['blood_type_distribution'], use_container_width=True)
+                
+                if 'abo_distribution' in time_figs:
+                    bt_cols[1].plotly_chart(time_figs['abo_distribution'], use_container_width=True)
+                
+                if 'phenotype_distribution' in time_figs:
+                    st.plotly_chart(time_figs['phenotype_distribution'], use_container_width=True)
             
             # Time-based metrics
             st.markdown("### Key Time-Based Metrics")
@@ -183,53 +193,6 @@ def show_campaign_effectiveness(df):
                 except Exception as e:
                     st.error(f"Error calculating time-based metrics: {e}")
             
-            # Eligibility over time
-            if has_dates and 'Eligibility' in date_filtered_df.columns:
-                st.markdown("### Eligibility Rate Over Time")
-                
-                # Group by month and calculate eligibility rate
-                try:
-                    date_filtered_df['YearMonth'] = date_filtered_df[date_col].dt.to_period('M')
-                    
-                    # Calculate eligibility percentage by month
-                    elig_by_month = date_filtered_df.groupby('YearMonth')['Eligibility'].apply(
-                        lambda x: (x == 'Eligible').mean() * 100
-                    ).reset_index()
-                    
-                    # Create a datetime column for proper sorting
-                    elig_by_month['YearMonth_dt'] = pd.to_datetime(elig_by_month['YearMonth'].astype(str) + '-01')
-                    elig_by_month = elig_by_month.sort_values('YearMonth_dt')
-                    
-                    # Create line chart using datetime column instead of string
-                    fig = px.line(
-                        elig_by_month,
-                        x='YearMonth_dt',  # Use datetime column instead of string
-                        y='Eligibility',
-                        markers=True,
-                        title='Eligibility Rate by Month',
-                        labels={
-                            'YearMonth_dt': 'Month',
-                            'Eligibility': 'Eligibility Rate (%)'
-                        }
-                    )
-                    
-                    # Format x-axis to show month and year
-                    fig.update_xaxes(
-                        tickformat="%b %Y",
-                        dtick="M1",
-                        tickangle=45
-                    )
-                    
-                    # Improve layout
-                    fig.update_layout(
-                        yaxis_title='Eligibility Rate (%)',
-                        yaxis=dict(range=[0, 100])
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                except Exception as e:
-                    st.error(f"Error creating eligibility time series: {e}")
         else:
             st.info("No date information is available for temporal analysis.")
     

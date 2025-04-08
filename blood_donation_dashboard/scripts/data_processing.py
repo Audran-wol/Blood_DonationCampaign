@@ -151,21 +151,21 @@ def generate_features(df):
     
     df_features = df.copy()
     
-    # Create donation season (if date column exists)
+    # Create donation month (if date column exists)
     if 'Date de remplissage de la fiche' in df_features.columns:
         df_features['Donation_Month'] = df_features['Date de remplissage de la fiche'].dt.month
+    
+    # Process blood type data
+    blood_type_col = next((col for col in df_features.columns if 'Groupe Sanguin' in col or 'Blood Type' in col or 'ABO' in col), None)
+    if blood_type_col:
+        # Ensure blood type column is clean
+        df_features[blood_type_col] = df_features[blood_type_col].fillna('Unknown')
         
-        # Map months to Cameroon seasons (Sunny and Rainy)
-        # Cameroon has only 2 seasons:
-        # Rainy: typically April to October
-        # Sunny: typically November to March
-        season_mapping = {
-            1: 'Sunny', 2: 'Sunny', 3: 'Sunny', 
-            4: 'Rainy', 5: 'Rainy', 6: 'Rainy',
-            7: 'Rainy', 8: 'Rainy', 9: 'Rainy', 
-            10: 'Rainy', 11: 'Sunny', 12: 'Sunny'
-        }
-        df_features['Donation_Season'] = df_features['Donation_Month'].map(season_mapping)
+        # Extract Rhesus factor
+        df_features['Rhesus_Factor'] = df_features[blood_type_col].str.contains('\+').map({True: 'Positive', False: 'Negative'})
+        
+        # Extract ABO blood group
+        df_features['ABO_Group'] = df_features[blood_type_col].str.replace('\+|\-', '', regex=True)
     
     # Age groups
     if 'Age' in df_features.columns:

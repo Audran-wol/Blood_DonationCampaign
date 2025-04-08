@@ -372,9 +372,19 @@ if page == "Overview":
             
             if 'donation_month' in trend_figs:
                 cols[1].plotly_chart(trend_figs['donation_month'], use_container_width=True)
+                
+            # Display blood type and phenotype distributions
+            st.subheader("Blood Type Analysis")
+            bt_cols = st.columns(2)
             
-            if 'donation_season' in trend_figs:
-                st.plotly_chart(trend_figs['donation_season'], use_container_width=True)
+            if 'blood_type_distribution' in trend_figs:
+                bt_cols[0].plotly_chart(trend_figs['blood_type_distribution'], use_container_width=True)
+            
+            if 'abo_distribution' in trend_figs:
+                bt_cols[1].plotly_chart(trend_figs['abo_distribution'], use_container_width=True)
+                
+            if 'phenotype_distribution' in trend_figs:
+                st.plotly_chart(trend_figs['phenotype_distribution'], use_container_width=True)
         else:
             st.info("No time trend data available for visualization.")
 

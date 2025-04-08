@@ -23,7 +23,8 @@ The Blood Donation Dashboard is an interactive web application built with Stream
 - **Machine Learning Models**: Predict donor eligibility using various machine learning algorithms.
 - **Feature Importance**: Identify key factors affecting donation eligibility.
 - **Model Evaluation**: Compare model performance with accuracy, precision, recall, and F1 scores.
-- **Cross-validation**: Ensure model reliability through k-fold cross-validation.
+- **Visual Explanations**: Visual indicators showing prediction confidence and reasoning.
+- **Health Risk Assessment**: Special handling for health conditions in prediction models.
 
 ### Campaign Effectiveness
 - **Campaign Analysis**: Track and analyze the effectiveness of different recruitment campaigns.
@@ -39,14 +40,17 @@ The Blood Donation Dashboard is an interactive web application built with Stream
 - **Scikit-learn Machine Learning**: Predictive modeling and clustering algorithms.
 
 ### Code Structure
-- `/dashboard/`: Contains the Streamlit application and UI components.
-  - `app.py`: Main application entry point.
-  - `/pages/`: Individual dashboard pages for different analysis features.
-- `/scripts/`: Contains the backend processing and analysis modules.
-  - `data_processing.py`: Functions for cleaning and preparing data.
-  - `clustering.py`: Donor clustering and profiling algorithms.
-  - `prediction_model.py`: Machine learning models for eligibility prediction.
-  - `visualization.py`: Functions for generating visualizations.
+- `/blood_donation_dashboard/`: Main project folder
+  - `/dashboard/`: Contains the Streamlit application and UI components.
+    - `app.py`: Main application entry point.
+    - `/pages/`: Individual dashboard pages for different analysis features.
+  - `/models/`: Contains machine learning models and prediction code.
+    - `eligibility_model.py`: Eligibility prediction model implementation.
+  - `/scripts/`: Contains the backend processing and analysis modules.
+    - `data_processing.py`: Functions for cleaning and preparing data.
+    - `clustering.py`: Donor clustering and profiling algorithms.
+    - `visualization.py`: Functions for generating visualizations.
+  - `/data/`: Sample datasets and data processing results.
 
 ## Getting Started
 
@@ -87,11 +91,28 @@ The repository includes sample anonymized blood donation data for testing and de
 
 ### Eligibility Prediction
 1. Go to the "Eligibility Prediction" tab
-2. Select features to include in the model
-3. Choose a machine learning algorithm
-4. Split the data for training and testing
-5. Train the model and view performance metrics
-6. Use the trained model to predict eligibility for new donors
+2. Enter donor information including health conditions (as Yes/No choices)
+3. Set Health Risk Score and other numeric features using sliders
+4. Click "Predict Eligibility" to see visual prediction results
+5. Explore feature importance and explanations for the prediction
+
+## Development Guidelines
+
+### Adding New Features
+1. Backend logic should be implemented in the appropriate script file
+2. UI components should be added to the corresponding page file
+3. Follow the existing patterns for data flow and state management
+
+### Performance Considerations
+1. Large datasets:
+   - Implement data sampling for initial visualizations
+   - Use efficient algorithms for clustering (MiniBatchKMeans for very large data)
+   - Consider caching for expensive computations
+
+2. Streamlit optimization:
+   - Use session state to persist data between interactions
+   - Avoid unnecessary recomputation on UI interactions
+   - Use st.cache_data for data loading functions
 
 ## Contributing
 Contributions to improve the Blood Donation Dashboard are welcome. Please follow these steps:

@@ -292,40 +292,92 @@ def create_campaign_effectiveness_vis(df):
             )
             figures['donation_month'] = fig_month
         
-        # Donation trends by season
-        if 'Donation_Season' in df.columns:
-            donations_by_season = df['Donation_Season'].value_counts()
-            donations_by_season = donations_by_season.reset_index()
-            donations_by_season.columns = ['Season', 'Donations']
+        # Blood type distribution analysis
+        blood_type_col = next((col for col in df.columns if 'Groupe Sanguin' in col or 'Blood Type' in col or 'ABO' in col), None)
+        if blood_type_col:
+            blood_types = df[blood_type_col].value_counts()
+            blood_types = blood_types.reset_index()
+            blood_types.columns = ['Blood Type', 'Count']
             
-            # Ensure seasons are in correct order for Cameroon
-            season_order = ['Sunny', 'Rainy']
-            donations_by_season['Season'] = pd.Categorical(
-                donations_by_season['Season'],
-                categories=season_order,
-                ordered=True
-            )
-            donations_by_season = donations_by_season.sort_values('Season')
+            # Add Rhesus grouping
+            blood_types['Rhesus'] = blood_types['Blood Type'].str.contains('\+').map({True: 'Positive', False: 'Negative'})
+            blood_types['ABO Group'] = blood_types['Blood Type'].str.replace('\+|\-', '', regex=True)
             
-            fig_season = px.bar(
-                donations_by_season,
-                x='Season',
-                y='Donations',
-                title='Donations by Season in Cameroon',
-                labels={'Season': 'Season', 'Donations': 'Number of Donations'},
-                color='Season',
+            # Create blood type distribution chart
+            fig_blood_type = px.bar(
+                blood_types,
+                x='Blood Type',
+                y='Count',
+                title='Blood Type Distribution',
+                labels={'Blood Type': 'Blood Type', 'Count': 'Number of Donors'},
+                color='Rhesus',
                 color_discrete_map={
-                    'Sunny': '#FFD700',  # Gold/yellow for sunny season
-                    'Rainy': '#4682B4'   # SteelBlue for rainy season
+                    'Positive': '#E57373',  # Light red for positive
+                    'Negative': '#64B5F6'   # Light blue for negative
                 }
             )
             
-            fig_season.update_layout(
-                xaxis_title='Season',
-                yaxis_title='Number of Donations'
+            fig_blood_type.update_layout(
+                xaxis_title='Blood Type',
+                yaxis_title='Number of Donors'
             )
             
-            figures['donation_season'] = fig_season
+            figures['blood_type_distribution'] = fig_blood_type
+            
+            # Create ABO group distribution chart (simplified)
+            abo_groups = blood_types.groupby('ABO Group')['Count'].sum().reset_index()
+            
+            fig_abo = px.pie(
+                abo_groups,
+                values='Count',
+                names='ABO Group',
+                title='ABO Blood Group Distribution',
+                color='ABO Group',
+                color_discrete_map={
+                    'A': '#C62828',  # Dark red
+                    'B': '#1976D2',  # Dark blue
+                    'AB': '#6A1B9A',  # Purple
+                    'O': '#2E7D32'   # Dark green
+                }
+            )
+            
+            fig_abo.update_layout(
+                legend_title='ABO Group'
+            )
+            
+            figures['abo_distribution'] = fig_abo
+        
+        # Phenotype analysis
+        if 'Phenotype' in df.columns:
+            # Extract most common phenotypes
+            phenotypes = []
+            for phenotype_str in df['Phenotype'].dropna():
+                for p in str(phenotype_str).split(','):
+                    p = p.strip()
+                    if p:
+                        phenotypes.append(p)
+            
+            phenotype_counts = pd.Series(phenotypes).value_counts().head(10)  # Top 10 phenotypes
+            phenotype_df = phenotype_counts.reset_index()
+            phenotype_df.columns = ['Phenotype', 'Count']
+            
+            # Create phenotype distribution chart
+            fig_phenotype = px.bar(
+                phenotype_df,
+                x='Phenotype',
+                y='Count',
+                title='Top 10 Blood Phenotypes',
+                labels={'Phenotype': 'Phenotype', 'Count': 'Number of Occurrences'},
+                color='Phenotype'
+            )
+            
+            fig_phenotype.update_layout(
+                xaxis_title='Phenotype',
+                yaxis_title='Number of Occurrences',
+                xaxis={'categoryorder':'total descending'}
+            )
+            
+            figures['phenotype_distribution'] = fig_phenotype
     
     # Demographic effectiveness analysis
     if 'Age_Group' in df.columns and 'Previous_Donation' in df.columns:
