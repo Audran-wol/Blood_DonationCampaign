@@ -531,6 +531,22 @@ def predict_eligibility(model_result, input_data):
         if not model_result or not isinstance(model_result, dict):
             print("Invalid model result")
             return None, None, "Invalid model"
+        
+        # CRITICAL SAFETY CHECK: Check for automatic disqualification conditions first
+        # These are medical conditions that automatically make someone ineligible to donate blood
+        automatic_disqualifiers = {
+            'Porteur(HIV,hbs,hcv)': ['Oui', 'Yes'],  # HIV, Hepatitis B/C carriers
+            'Drepanocytaire': ['Oui', 'Yes'],        # Sickle cell disease
+        }
+        
+        for condition, disqualifying_values in automatic_disqualifiers.items():
+            if condition in input_data and input_data[condition] in disqualifying_values:
+                # Found a disqualifying condition - automatic ineligibility
+                explanation = f"Automatic disqualification: {condition} is {input_data[condition]}. "
+                explanation += "This is a medical contraindication for blood donation based on safety protocols."
+                
+                # Return prediction=0 (ineligible), probability=0.0, and explanation
+                return 0, 0.0, explanation
             
         # Get model, features from result
         pipeline = model_result.get('model')  # Use the entire pipeline

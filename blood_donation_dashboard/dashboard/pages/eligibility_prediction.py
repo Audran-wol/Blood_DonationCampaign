@@ -206,10 +206,30 @@ def show_eligibility_prediction(df):
             
             col1, col2 = st.columns(2)
             
-            for i, feature in enumerate(features):
+            # Define automatic disqualifiers to exclude from the input form
+            automatic_disqualifiers = [
+                'Porteur(HIV,hbs,hcv)',  # HIV, Hepatitis B/C carriers
+                'Drepanocytaire',        # Sickle cell disease
+            ]
+            
+            # Create a notice about automatic disqualifications
+            st.info("""
+            ### Medical Safety Information
+            Certain medical conditions automatically disqualify a person from donating blood 
+            for the safety of both donors and recipients. These include:
+            - HIV, Hepatitis B, or Hepatitis C positive status
+            - Sickle Cell Disease
+            
+            These conditions are not included in the prediction form as they result in automatic disqualification.
+            """)
+            
+            # Filter out the automatic disqualifiers from features
+            filtered_features = [f for f in features if f not in automatic_disqualifiers]
+            
+            for i, feature in enumerate(filtered_features):
                 # Identify health condition features that should be boolean/categorical
-                health_conditions = ['Antécédent_de_transfusion', 'Porteur(HIV,hbs,hcv)', 'Opéré', 
-                                    'Drepanocytaire', 'Diabétique', 'Hypertendus', 'Asthmatiques',
+                health_conditions = ['Antécédent_de_transfusion', 'Opéré',  
+                                    'Diabétique', 'Hypertendus', 'Asthmatiques',
                                     'Cardiaque', 'Tatoué', 'Scarifié']
                 
                 # Check if feature is categorical (non-numeric) or should be treated as categorical
@@ -327,9 +347,12 @@ def show_eligibility_prediction(df):
                         # Create visually appealing prediction display
                         col1, col2 = st.columns([1, 3])
                         
+                        # Check if this is an automatic disqualification
+                        is_auto_disqualification = "Automatic disqualification" in explanation if explanation else False
+                        
                         with col1:
                             # Display a circular indicator with percentage
-                            if prediction == 1:
+                            if prediction == 1 and not is_auto_disqualification:
                                 fig = go.Figure(go.Indicator(
                                     mode="gauge+number",
                                     value=probability*100,
@@ -339,108 +362,127 @@ def show_eligibility_prediction(df):
                                         'axis': {'range': [0, 100]},
                                         'bar': {'color': "green"},
                                         'threshold': {
-                                            'line': {'color': "green", 'width': 4},
+                                            'line': {'color': "red", 'width': 4},
                                             'thickness': 0.75,
-                                            'value': 80
+                                            'value': 50
                                         }
                                     }
                                 ))
                             else:
+                                # For ineligible or auto-disqualified, always show 0%
                                 fig = go.Figure(go.Indicator(
                                     mode="gauge+number",
-                                    value=(1-probability)*100,
+                                    value=0,  # Always 0 for ineligible
                                     domain={'x': [0, 1], 'y': [0, 1]},
-                                    title={'text': "Not Eligible"},
+                                    title={'text': "Eligibility"},
                                     gauge={
                                         'axis': {'range': [0, 100]},
                                         'bar': {'color': "red"},
                                         'threshold': {
-                                            'line': {'color': "red", 'width': 4},
+                                            'line': {'color': "green", 'width': 4},
                                             'thickness': 0.75,
-                                            'value': 80
+                                            'value': 50
                                         }
                                     }
                                 ))
                             
-                            fig.update_layout(height=250, width=250)
+                            fig.update_layout(height=250)
                             st.plotly_chart(fig, use_container_width=True)
                         
                         with col2:
-                            # Display the prediction result
-                            if prediction == 1:
-                                st.success(f"### Prediction: ELIGIBLE (Probability: {prob_formatted})")
+                            # Display prediction text with explanation
+                            if prediction == 1 and not is_auto_disqualification:
+                                st.markdown(f"### Prediction: **ELIGIBLE**")
+                                st.markdown(f"Confidence: **{prob_formatted}**")
                             else:
-                                st.error(f"### Prediction: NOT ELIGIBLE (Probability: {prob_formatted})")
+                                st.markdown(f"### Prediction: **NOT ELIGIBLE**")
+                                if is_auto_disqualification:
+                                    st.markdown("### ⚠️ MEDICAL DISQUALIFICATION ⚠️")
+                                    st.markdown(f"**{explanation}**")
+                                else:
+                                    st.markdown(f"Confidence: **{prob_formatted}**")
                             
-                            # Display explanation if available (abbreviated version)
-                            if explanation:
-                                st.markdown("### Key Factors:")
-                                # Extract the first few lines of the explanation to show here
-                                key_points = "\n".join(explanation.split("\n")[:5])
-                                st.markdown(key_points)
-                        
-                        # Display full explanation if available
-                        if explanation:
-                            with st.expander("View Full Explanation"):
-                                st.markdown(explanation)
-                        
-                        # Display feature importances if available
-                        if feature_importances and isinstance(feature_importances, dict) and len(feature_importances) > 0:
-                            with st.expander("View Feature Importance Chart"):
-                                importances = pd.DataFrame({
-                                    'Feature': list(feature_importances.keys()),
-                                    'Importance': list(feature_importances.values())
-                                })
-                                
-                                # Sort by importance
-                                importances = importances.sort_values('Importance', ascending=False).head(10)
-                                
-                                # Create bar chart
-                                fig = px.bar(
-                                    importances, 
-                                    x='Importance', 
-                                    y='Feature', 
-                                    orientation='h',
-                                    title='Top 10 Feature Importances'
-                                )
-                                
-                                st.plotly_chart(fig, use_container_width=True)
+                            # Display explanation in expander
+                            with st.expander("View Explanation"):
+                                if explanation:
+                                    st.write(explanation)
+                                else:
+                                    st.write("No explanation available.")
+                            
+                            # Display feature importances if available (only for model-based predictions)
+                            if not is_auto_disqualification and feature_importances and isinstance(feature_importances, dict) and len(feature_importances) > 0:
+                                with st.expander("View Feature Importance Chart"):
+                                    importances = pd.DataFrame({
+                                        'Feature': list(feature_importances.keys()),
+                                        'Importance': list(feature_importances.values())
+                                    })
+                                    
+                                    # Sort by importance
+                                    importances = importances.sort_values('Importance', ascending=False).head(10)
+                                    
+                                    # Create bar chart
+                                    fig = px.bar(
+                                        importances, 
+                                        x='Importance', 
+                                        y='Feature', 
+                                        orientation='h',
+                                        title='Top 10 Feature Importances'
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
                     
                     # Process the prediction and display results
                     def process_prediction(model_result, input_data):
                         """Process the prediction and display results"""
-                        # Make prediction
+                        # Set automatic disqualifiers to 'No' by default if not in input_data
+                        # This means missing fields won't trigger disqualification
+                        disqualifiers = {
+                            'Porteur(HIV,hbs,hcv)': 'Non',  # Default to 'No'
+                            'Drepanocytaire': 'Non'         # Default to 'No'
+                        }
+                        
+                        # Update input_data with default values for any missing disqualifiers
+                        for disqualifier, default_value in disqualifiers.items():
+                            if disqualifier not in input_data:
+                                input_data[disqualifier] = default_value
+                        
+                        # Get prediction
                         prediction, probability, explanation = predict_with_input_data(model_result, input_data)
                         
                         # Display prediction result
-                        display_prediction_result(prediction, probability, explanation, 
-                                                 model_result.get('feature_importances') if model_result else None)
-                        
-                        return prediction, probability
+                        if prediction is not None:
+                            # Calculate feature importances if possible
+                            feature_importances = None
+                            if model_result and 'feature_importances' in model_result:
+                                feature_importances = model_result['feature_importances']
+                            
+                            # Display the prediction result
+                            display_prediction_result(prediction, probability, explanation, feature_importances)
+                            
+                            # Provide additional recommendations for ineligible donors
+                            is_auto_disqualification = "Automatic disqualification" in explanation if explanation else False
+                            if prediction == 0 and not is_auto_disqualification:
+                                st.info("Recommendations for improving eligibility:")
+                                st.markdown("""
+                                - Ensure adequate iron levels and overall health
+                                - Wait an appropriate time since last donation (typically 56 days)
+                                - Maintain a healthy weight
+                                - Ensure you meet minimum age requirements
+                                - Consult with healthcare provider about any medical conditions
+                                """)
                     
                     # Make prediction
-                    prediction, probability = process_prediction(model_result, input_data)
+                    process_prediction(model_result, input_data)
                     
-                    # Provide additional recommendations for ineligible donors
-                    if prediction == 0:
-                        st.info("Recommendations for improving eligibility:")
-                        st.markdown("""
-                        - Ensure adequate iron levels and overall health
-                        - Wait an appropriate time since last donation (typically 56 days)
-                        - Maintain a healthy weight
-                        - Ensure you meet minimum age requirements
-                        - Consult with healthcare provider about any medical conditions
-                        """)
+                    # Add disclaimer
+                    st.markdown("""
+                    **Disclaimer:** This prediction is based on statistical modeling and should be used as a guide only. 
+                    Final eligibility determination should always be made by qualified medical professionals in accordance with 
+                    official blood donation guidelines.
+                    """)
                 else:
                     st.error("Model training failed. Please check the console for details.")
-            
-            # Add disclaimer
-            st.markdown("""
-            **Disclaimer:** This prediction is based on statistical modeling and should be used as a guide only. 
-            Final eligibility determination should always be made by qualified medical professionals in accordance with 
-            official blood donation guidelines.
-            """)
-
+                    
 # Run the page function if this script is run directly
 if __name__ == "__main__":
     # Load sample data
