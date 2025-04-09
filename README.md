@@ -20,11 +20,13 @@ The Blood Donation Dashboard is an interactive web application built with Stream
 - **PCA Visualization**: View clusters in 2D space using Principal Component Analysis.
 
 ### Eligibility Prediction
+- **Three-Category Prediction System**: Classify donors as Eligible, Temporarily Ineligible, or Definitely Ineligible.
 - **Machine Learning Models**: Predict donor eligibility using various machine learning algorithms.
 - **Feature Importance**: Identify key factors affecting donation eligibility.
 - **Model Evaluation**: Compare model performance with accuracy, precision, recall, and F1 scores.
 - **Visual Explanations**: Visual indicators showing prediction confidence and reasoning.
 - **Health Risk Assessment**: Special handling for health conditions in prediction models.
+- **Waiting Period Information**: For temporarily ineligible donors, provides specific waiting periods before they can donate again.
 
 ### Campaign Effectiveness
 - **Campaign Analysis**: Track and analyze the effectiveness of different recruitment campaigns.
@@ -73,7 +75,7 @@ pip install -r requirements.txt
 
 3. Run the dashboard:
 ```bash
-cd dashboard
+cd blood_donation_dashboard/dashboard
 streamlit run app.py
 ```
 
@@ -93,8 +95,12 @@ The repository includes sample anonymized blood donation data for testing and de
 1. Go to the "Eligibility Prediction" tab
 2. Enter donor information including health conditions (as Yes/No choices)
 3. Set Health Risk Score and other numeric features using sliders
-4. Click "Predict Eligibility" to see visual prediction results
-5. Explore feature importance and explanations for the prediction
+4. Click "Predict Eligibility" to see results in one of three categories:
+   - **Eligible**: Can donate blood immediately
+   - **Temporarily Ineligible**: Cannot donate now but may become eligible after a waiting period
+   - **Definitely Ineligible**: Cannot donate due to permanent medical contraindications
+5. Review the detailed explanation and waiting period information (if applicable)
+6. Follow the personalized recommendations based on eligibility status
 
 ## Development Guidelines
 
