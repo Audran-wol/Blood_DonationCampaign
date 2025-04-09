@@ -512,7 +512,10 @@ def load_model(filepath='../models/eligibility_model.pkl'):
 
 def predict_eligibility(model_result, input_data):
     """
-    Predict eligibility for new donor data.
+    Predict eligibility for new donor data with three categories:
+    - Eligible (2)
+    - Temporarily Ineligible (1)
+    - Definitely Ineligible (0)
     
     Parameters:
     -----------
@@ -524,7 +527,8 @@ def predict_eligibility(model_result, input_data):
     Returns:
     --------
     tuple
-        (prediction, probability, prediction_explanation)
+        (prediction_category, probability, prediction_explanation)
+        prediction_category: 2=Eligible, 1=Temporarily Ineligible, 0=Definitely Ineligible
     """
     try:
         # Check if model_result is valid
@@ -533,20 +537,43 @@ def predict_eligibility(model_result, input_data):
             return None, None, "Invalid model"
         
         # CRITICAL SAFETY CHECK: Check for automatic disqualification conditions first
-        # These are medical conditions that automatically make someone ineligible to donate blood
-        automatic_disqualifiers = {
+        # These are medical conditions that permanently make someone ineligible
+        permanent_disqualifiers = {
             'Porteur(HIV,hbs,hcv)': ['Oui', 'Yes'],  # HIV, Hepatitis B/C carriers
             'Drepanocytaire': ['Oui', 'Yes'],        # Sickle cell disease
         }
         
-        for condition, disqualifying_values in automatic_disqualifiers.items():
+        # Check for permanent disqualifiers
+        for condition, disqualifying_values in permanent_disqualifiers.items():
             if condition in input_data and input_data[condition] in disqualifying_values:
-                # Found a disqualifying condition - automatic ineligibility
-                explanation = f"Automatic disqualification: {condition} is {input_data[condition]}. "
-                explanation += "This is a medical contraindication for blood donation based on safety protocols."
+                # Found a permanent disqualifying condition - definitely ineligible (0)
+                explanation = f"Definitely Ineligible: {condition} is {input_data[condition]}. "
+                explanation += "This is a permanent medical contraindication for blood donation based on safety protocols."
                 
-                # Return prediction=0 (ineligible), probability=0.0, and explanation
+                # Return prediction=0 (definitely ineligible), probability=0.0, and explanation
                 return 0, 0.0, explanation
+        
+        # Check for temporary disqualification conditions
+        temporary_disqualifiers = {
+            'Tatoué': ['Oui', 'Yes'],           # Recent tattoo
+            'Opéré': ['Oui', 'Yes'],            # Recent surgery
+            'Antécédent_de_transfusion': ['Oui', 'Yes']  # Previous transfusion
+        }
+        
+        for condition, disqualifying_values in temporary_disqualifiers.items():
+            if condition in input_data and input_data[condition] in disqualifying_values:
+                # Found a temporary disqualifying condition - temporarily ineligible (1)
+                wait_periods = {
+                    'Tatoué': "4 months",
+                    'Opéré': "6 months", 
+                    'Antécédent_de_transfusion': "12 months"
+                }
+                
+                explanation = f"Temporarily Ineligible: {condition} is {input_data[condition]}. "
+                explanation += f"You may be eligible after waiting {wait_periods.get(condition, 'a period of time')}."
+                
+                # Return prediction=1 (temporarily ineligible), probability=0.0, and explanation
+                return 1, 0.0, explanation
             
         # Get model, features from result
         pipeline = model_result.get('model')  # Use the entire pipeline
@@ -588,18 +615,22 @@ def predict_eligibility(model_result, input_data):
         # Make prediction using the full pipeline
         # The pipeline will handle the preprocessing automatically
         try:
-            prediction = pipeline.predict(input_df)[0]
+            base_prediction = pipeline.predict(input_df)[0]
             probability = pipeline.predict_proba(input_df)[0][1]  # Probability of class 1
             
-            # Generate explanation based on feature importances
+            # If the model predicts eligible (1), return our category 2 (Eligible)
+            # Otherwise, check for temporary disqualifiers and return either 1 or 0
+            prediction_category = 2 if base_prediction == 1 else 0
+            
+            # Generate explanation based on feature importances and the three-category system
             explanation = generate_prediction_explanation(
-                prediction, 
+                prediction_category, 
                 probability, 
                 input_df, 
                 feature_importances
             )
             
-            return prediction, probability, explanation
+            return prediction_category, probability, explanation
         except ValueError as e:
             # If there's still a feature mismatch, try a more direct approach
             print(f"Error in pipeline prediction: {e}")
@@ -622,11 +653,14 @@ def predict_eligibility(model_result, input_data):
                 
                 # Try prediction again with the aligned input
                 model_only = pipeline.named_steps.get('model', pipeline)
-                prediction = model_only.predict(aligned_input)[0]
+                base_prediction = model_only.predict(aligned_input)[0]
                 probability = model_only.predict_proba(aligned_input)[0][1]
                 
+                # Translate the binary prediction to our 3-category system
+                prediction_category = 2 if base_prediction == 1 else 0
+                
                 explanation = "Prediction made with limited feature matching. Results may be less accurate."
-                return prediction, probability, explanation
+                return prediction_category, probability, explanation
             else:
                 return None, None, f"Error: {str(e)}"
         
@@ -636,16 +670,16 @@ def predict_eligibility(model_result, input_data):
         traceback.print_exc()
         return None, None, f"Error: {str(e)}"
 
-def generate_prediction_explanation(prediction, probability, input_data, feature_importances):
+def generate_prediction_explanation(prediction_category, probability, input_data, feature_importances):
     """
     Generate a human-readable explanation for the prediction.
     
     Parameters:
     -----------
-    prediction : int
-        Predicted class (0 or 1)
+    prediction_category : int
+        Predicted category (0=Definitely Ineligible, 1=Temporarily Ineligible, 2=Eligible)
     probability : float
-        Probability of positive class
+        Probability of positive class from the base model
     input_data : pd.DataFrame
         Input data used for prediction
     feature_importances : dict
@@ -667,40 +701,46 @@ def generate_prediction_explanation(prediction, probability, input_data, feature
         # Get top 5 most important features
         top_features = sorted_features[:5]
         
-        # Initialize explanation
-        if prediction == 1:
+        # Initialize explanation based on the three-category prediction
+        if prediction_category == 2:
             explanation = f"Donor predicted as ELIGIBLE with {probability:.1%} confidence.\n\n"
-        else:
-            explanation = f"Donor predicted as NOT ELIGIBLE with {(1-probability):.1%} confidence.\n\n"
+            explanation += "This donor can donate blood immediately following standard protocols.\n\n"
+        elif prediction_category == 1:
+            explanation = "Donor predicted as TEMPORARILY INELIGIBLE.\n\n"
+            explanation += "This donor may become eligible after a waiting period. They should be encouraged to return after the specified waiting period.\n\n"
+        else:  # prediction_category == 0
+            explanation = f"Donor predicted as DEFINITELY INELIGIBLE with {(1-probability):.1%} confidence.\n\n"
+            explanation += "This donor cannot donate blood due to permanent medical contraindications.\n\n"
         
-        explanation += "Top factors influencing this prediction:\n"
-        
-        # Add top features to explanation
-        for feature_name, importance in top_features:
-            # Clean up feature name if it's from one-hot encoding
-            display_name = feature_name
-            if '_x0_' in feature_name or '_x1_' in feature_name:
-                base_name = feature_name.split('_x')[0]
-                value = feature_name.split('_x')[1].split('_')[1]
-                display_name = f"{base_name} = {value}"
+        # Only add feature importance for Eligible and Definitely Ineligible predictions
+        # For Temporarily Ineligible, the specific condition is already explained
+        if prediction_category != 1:
+            explanation += "Top factors influencing this prediction:\n"
             
-            # Try to get the actual value from input data
-            value = None
-            # Check if the exact feature name exists in input_data
-            if feature_name in input_data.columns:
-                value = input_data[feature_name].iloc[0]
-            # For one-hot encoded features, check if base name exists
-            elif '_x0_' in feature_name or '_x1_' in feature_name:
-                base_name = feature_name.split('_x')[0]
-                if base_name in input_data.columns:
-                    value = input_data[base_name].iloc[0]
-            
-            if value is not None:
-                explanation += f"- {display_name} (value: {value}, importance: {importance:.3f})\n"
-            else:
-                explanation += f"- {display_name} (importance: {importance:.3f})\n"
-        
-        explanation += "\nNote: The higher the importance value, the more influence that factor has on the prediction."
+            # Add top features to explanation
+            for feature_name, importance in top_features:
+                # Clean up feature name if it's from one-hot encoding
+                display_name = feature_name
+                if '_x0_' in feature_name or '_x1_' in feature_name:
+                    base_name = feature_name.split('_x')[0]
+                    value = feature_name.split('_x')[1].split('_')[1]
+                    display_name = f"{base_name} = {value}"
+                
+                # Try to get the actual value from input data
+                value = None
+                # Check if the exact feature name exists in input_data
+                if feature_name in input_data.columns:
+                    value = input_data[feature_name].iloc[0]
+                # For one-hot encoded features, check if base name exists
+                elif '_x0_' in feature_name or '_x1_' in feature_name:
+                    base_name = feature_name.split('_x')[0]
+                    if base_name in input_data.columns:
+                        value = input_data[base_name].iloc[0]
+                
+                if value is not None:
+                    explanation += f"- {display_name} (value: {value}, importance: {importance:.3f})\n"
+                else:
+                    explanation += f"- {display_name} (importance: {importance:.3f})\n"
         
         return explanation
     except Exception as e:

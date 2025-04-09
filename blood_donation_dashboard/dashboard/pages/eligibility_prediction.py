@@ -347,12 +347,14 @@ def show_eligibility_prediction(df):
                         # Create visually appealing prediction display
                         col1, col2 = st.columns([1, 3])
                         
-                        # Check if this is an automatic disqualification
-                        is_auto_disqualification = "Automatic disqualification" in explanation if explanation else False
+                        # Check if this is an automatic disqualification (now specified in explanation)
+                        is_definitely_ineligible = "Definitely Ineligible" in explanation if explanation else False
+                        is_temporarily_ineligible = "Temporarily Ineligible" in explanation if explanation else False
                         
                         with col1:
-                            # Display a circular indicator with percentage
-                            if prediction == 1 and not is_auto_disqualification:
+                            # Display a circular indicator with percentage based on the three-category prediction
+                            # prediction: 2=Eligible, 1=Temporarily Ineligible, 0=Definitely Ineligible
+                            if prediction == 2:  # Eligible
                                 fig = go.Figure(go.Indicator(
                                     mode="gauge+number",
                                     value=probability*100,
@@ -368,11 +370,26 @@ def show_eligibility_prediction(df):
                                         }
                                     }
                                 ))
-                            else:
-                                # For ineligible or auto-disqualified, always show 0%
+                            elif prediction == 1:  # Temporarily Ineligible
                                 fig = go.Figure(go.Indicator(
                                     mode="gauge+number",
-                                    value=0,  # Always 0 for ineligible
+                                    value=30,  # Show 30% for temporarily ineligible
+                                    domain={'x': [0, 1], 'y': [0, 1]},
+                                    title={'text': "Eligibility"},
+                                    gauge={
+                                        'axis': {'range': [0, 100]},
+                                        'bar': {'color': "orange"},
+                                        'threshold': {
+                                            'line': {'color': "green", 'width': 4},
+                                            'thickness': 0.75,
+                                            'value': 50
+                                        }
+                                    }
+                                ))
+                            else:  # Definitely Ineligible
+                                fig = go.Figure(go.Indicator(
+                                    mode="gauge+number",
+                                    value=0,  # Always 0% for definitely ineligible
                                     domain={'x': [0, 1], 'y': [0, 1]},
                                     title={'text': "Eligibility"},
                                     gauge={
@@ -390,17 +407,18 @@ def show_eligibility_prediction(df):
                             st.plotly_chart(fig, use_container_width=True)
                         
                         with col2:
-                            # Display prediction text with explanation
-                            if prediction == 1 and not is_auto_disqualification:
+                            # Display prediction text with explanation based on the three-category prediction
+                            if prediction == 2:  # Eligible
                                 st.markdown(f"### Prediction: **ELIGIBLE**")
                                 st.markdown(f"Confidence: **{prob_formatted}**")
-                            else:
-                                st.markdown(f"### Prediction: **NOT ELIGIBLE**")
-                                if is_auto_disqualification:
-                                    st.markdown("### ⚠️ MEDICAL DISQUALIFICATION ⚠️")
-                                    st.markdown(f"**{explanation}**")
-                                else:
-                                    st.markdown(f"Confidence: **{prob_formatted}**")
+                                st.markdown("This donor can donate blood immediately.")
+                            elif prediction == 1:  # Temporarily Ineligible
+                                st.markdown(f"### Prediction: **TEMPORARILY INELIGIBLE**")
+                                st.markdown("This donor cannot donate blood at this time but may become eligible in the future.")
+                            else:  # Definitely Ineligible
+                                st.markdown(f"### Prediction: **DEFINITELY INELIGIBLE**")
+                                st.markdown("### ⚠️ MEDICAL DISQUALIFICATION ⚠️")
+                                st.markdown("This donor cannot donate blood due to permanent medical contraindications.")
                             
                             # Display explanation in expander
                             with st.expander("View Explanation"):
@@ -410,7 +428,8 @@ def show_eligibility_prediction(df):
                                     st.write("No explanation available.")
                             
                             # Display feature importances if available (only for model-based predictions)
-                            if not is_auto_disqualification and feature_importances and isinstance(feature_importances, dict) and len(feature_importances) > 0:
+                            # Don't show for temporary ineligibility as it's rule-based
+                            if prediction != 1 and feature_importances and isinstance(feature_importances, dict) and len(feature_importances) > 0:
                                 with st.expander("View Feature Importance Chart"):
                                     importances = pd.DataFrame({
                                         'Feature': list(feature_importances.keys()),
@@ -460,16 +479,51 @@ def show_eligibility_prediction(df):
                             display_prediction_result(prediction, probability, explanation, feature_importances)
                             
                             # Provide additional recommendations for ineligible donors
-                            is_auto_disqualification = "Automatic disqualification" in explanation if explanation else False
-                            if prediction == 0 and not is_auto_disqualification:
-                                st.info("Recommendations for improving eligibility:")
-                                st.markdown("""
-                                - Ensure adequate iron levels and overall health
-                                - Wait an appropriate time since last donation (typically 56 days)
-                                - Maintain a healthy weight
-                                - Ensure you meet minimum age requirements
-                                - Consult with healthcare provider about any medical conditions
-                                """)
+                            if prediction is not None:
+                                st.markdown("### Recommendations")
+                                
+                                if prediction == 2:  # Eligible
+                                    st.success("""
+                                    ✅ **You are eligible to donate blood.**
+                                    
+                                    **Next Steps:**
+                                    - Schedule an appointment at your nearest blood collection center
+                                    - Eat iron-rich foods before donation (meat, beans, spinach)
+                                    - Stay well hydrated before and after donation
+                                    - Bring identification to your appointment
+                                    """)
+                                    
+                                elif prediction == 1:  # Temporarily Ineligible
+                                    # Extract waiting period from explanation if available
+                                    waiting_period = "the required waiting period"
+                                    import re
+                                    if explanation:
+                                        wait_match = re.search(r"waiting ([0-9]+ \w+)", explanation)
+                                        if wait_match:
+                                            waiting_period = wait_match.group(1)
+                                    
+                                    st.warning(f"""
+                                    ⏱️ **You are temporarily ineligible to donate blood.**
+                                    
+                                    **Next Steps:**
+                                    - Return after {waiting_period}
+                                    - Register for a donation reminder at that time
+                                    - Consider referring eligible friends and family in the meantime
+                                    - If your status is due to a medical condition, consult with a healthcare provider
+                                    """)
+                                
+                                else:  # Definitely Ineligible
+                                    st.error("""
+                                    ❌ **You are not eligible to donate blood.**
+                                    
+                                    **Next Steps:**
+                                    - Thank you for your willingness to help
+                                    - Please consider other ways to support blood donation:
+                                      - Volunteer at blood drives
+                                      - Encourage eligible friends and family to donate
+                                      - Help raise awareness about blood donation
+                                    - If you have questions about your eligibility, please consult with a healthcare provider
+                                    """)
                     
                     # Make prediction
                     process_prediction(model_result, input_data)
@@ -483,6 +537,30 @@ def show_eligibility_prediction(df):
                 else:
                     st.error("Model training failed. Please check the console for details.")
                     
+    st.markdown("""
+    ## About the Eligibility Prediction Model
+    
+    This page uses a machine learning model to predict blood donor eligibility based on various health factors and demographic information.
+    
+    ### Prediction Categories
+    
+    The system categorizes donors into three groups:
+    
+    1. **Eligible** - Donors who can donate blood immediately
+    2. **Temporarily Ineligible** - Donors who cannot donate now but may become eligible after a waiting period (e.g., after recent tattoo, surgery, or transfusion)
+    3. **Definitely Ineligible** - Donors who cannot donate blood due to permanent medical contraindications (e.g., certain chronic conditions)
+    
+    ### How It Works
+    
+    The prediction system uses:
+    
+    1. **Automatic Rules**: Certain medical conditions trigger immediate categorization as temporarily or definitely ineligible
+    2. **Machine Learning Model**: For other cases, we use a Random Forest classifier to predict eligibility
+    3. **Confidence Level**: The model provides a confidence level for each prediction
+    
+    > Note: This prediction is for informational purposes only and is not a substitute for professional medical evaluation.
+    """)
+
 # Run the page function if this script is run directly
 if __name__ == "__main__":
     # Load sample data
